@@ -29,6 +29,85 @@ def get_music_player(guild_id):
         music_players[guild_id] = MusicPlayer(bot)
     return music_players[guild_id]
 
+# ========== SEARCH BUTON VIEW ==========
+
+class SearchView(discord.ui.View):
+    """YouTube arama sonuçları için buton view"""
+    def __init__(self, results, interaction, downloader, timeout=60):
+        super().__init__(timeout=timeout)
+        self.results = results
+        self.original_interaction = interaction
+        self.downloader = downloader
+        self.selected = None
+        
+        # Her sonuç için bir buton oluştur
+        for i, result in enumerate(results[:5], 1):
+            # Buton etiketi çok uzunsa kısalt
+            label = result['title'][:80] if len(result['title']) > 80 else result['title']
+            
+            # Closure sorununu önlemek için factory fonksiyonu
+            def make_callback(index):
+                async def callback(btn_interaction):
+                    await self.select_result(btn_interaction, index)
+                return callback
+            
+            button = discord.ui.Button(
+                label=f"{i}. {label}",
+                style=discord.ButtonStyle.primary,
+                custom_id=f"search_{i}"
+            )
+            button.callback = make_callback(i - 1)
+            self.add_item(button)
+    
+    async def select_result(self, interaction: discord.Interaction, index: int):
+        """Butona tıklandığında çağrılır"""
+        if self.selected is not None:
+            await interaction.response.send_message("❌ Zaten bir seçim yapıldı!", ephemeral=True)
+            return
+        
+        self.selected = self.results[index]
+        
+        # Butonları devre dışı bırak
+        for item in self.children:
+            item.disabled = True
+        
+        await interaction.response.edit_message(view=self)
+        
+        # Ses kanalı kontrolü
+        if interaction.guild.voice_client is None:
+            if interaction.user.voice is None:
+                await interaction.followup.send("❌ Önce bir ses kanalına katılmanız gerekiyor!", ephemeral=True)
+                return
+            await interaction.user.voice.channel.connect()
+        
+        player = get_music_player(interaction.guild.id)
+        
+        video_url = f"https://www.youtube.com/watch?v={self.selected['id']}"
+        
+        await interaction.followup.send(f"🔽 İndiriliyor: {self.selected['title']}")
+        
+        try:
+            file_path = await self.downloader.download_and_save(video_url)
+            
+            if file_path:
+                await player.add_to_queue(interaction, file_path, interaction.user)
+                await interaction.followup.send(f"✅ **{self.selected['title']}** kütüphaneye kaydedildi ve kuyruğa eklendi!")
+            else:
+                await interaction.followup.send("❌ İndirme başarısız oldu!")
+        except Exception as e:
+            await interaction.followup.send(f"❌ Hata: {str(e)}")
+    
+    async def on_timeout(self):
+        """Timeout olduğunda butonları devre dışı bırak"""
+        for item in self.children:
+            item.disabled = True
+        # View'ı güncellemek için mesajı bulmaya çalış
+        try:
+            if hasattr(self, 'message') and self.message:
+                await self.message.edit(view=self)
+        except:
+            pass
+
 @bot.event
 async def on_ready():
     print(f'{bot.user} olarak giriş yapıldı!')
@@ -119,7 +198,7 @@ async def play(interaction: discord.Interaction, query: str):
         await player.add_to_queue(interaction, file_path, interaction.user)
 
 @tree.command(name='search', description='YouTube\'da şarkı ara ve seç')
-@app_commands.describe(query='Arama terimi', choice='Seçilecek sonuç numarası (1-5, opsiyonel)')
+@app_commands.describe(query='Arama terimi', choice='Seçilecek sonuç numarası (1-5, opsiyonel - butonlar kullanılıyorsa gerekli değil)')
 async def search(interaction: discord.Interaction, query: str, choice: Optional[int] = None):
     """YouTube'da şarkı ara"""
     await interaction.response.defer()
@@ -133,17 +212,31 @@ async def search(interaction: discord.Interaction, query: str, choice: Optional[
             return
         
         # Sonuçları göster
-        results_text = "🔍 **Arama Sonuçları:**\n"
-        results_text += "Bir şarkı seçmek için `/search query:<arama> choice:<numara>` komutunu kullanın.\n\n"
+        embed = discord.Embed(
+            title="🔍 Arama Sonuçları",
+            description="Aşağıdaki butonlardan birini seçin:",
+            color=discord.Color.blue()
+        )
         
         for i, result in enumerate(results, 1):
             duration_min = result['duration'] // 60 if result.get('duration') else 0
             duration_sec = result['duration'] % 60 if result.get('duration') else 0
-            results_text += f"**{i}.** {result['title']} ({duration_min}:{duration_sec:02d})\n"
+            embed.add_field(
+                name=f"{i}. {result['title'][:256]}",
+                value=f"⏱️ Süre: {duration_min}:{duration_sec:02d}",
+                inline=False
+            )
         
-        await interaction.followup.send(results_text)
+        embed.set_footer(text="Butonlar 60 saniye sonra devre dışı kalacak")
         
-        # Eğer choice verilmişse, seçilen şarkıyı çal
+        # Buton view oluştur
+        view = SearchView(results, interaction, downloader, timeout=60)
+        
+        # Mesajı gönder ve view'ı ekle
+        message = await interaction.followup.send(embed=embed, view=view)
+        view.message = message  # Timeout için mesaj referansı
+        
+        # Eğer choice parametresi verilmişse (eski yöntem, geriye dönük uyumluluk için)
         if choice is not None:
             if choice < 1 or choice > 5:
                 await interaction.followup.send("❌ Seçim 1-5 arasında olmalı!", ephemeral=True)
@@ -269,7 +362,7 @@ async def help_command(interaction: discord.Interaction):
         name="🎵 Müzik Çalma Komutları",
         value=(
             "`/play query:<dosya/link>` - Yerel dosya veya YouTube linki çal\n"
-            "`/search query:<arama> [choice:<numara>]` - YouTube'da ara ve seç\n"
+            "`/search query:<arama> [choice:<numara>]` - YouTube'da ara ve butonlarla seç\n"
             "`/skip` - Şarkıyı geç\n"
             "`/stop` - Müziği durdur\n"
             "`/pause` - Müziği duraklat\n"

@@ -135,14 +135,15 @@ Bot artık Discord'un slash komut sistemini kullanıyor! Discord'da `/` yazdığ
 
 ### YouTube'da Arama ve Çalma
 ```
-# Önce arama yap (sonuçları gösterir)
+# Arama yap - sonuçlar butonlarla gösterilir
 /search query:eminem lose yourself
 
-# Sonuçlardan birini seçmek için choice parametresi ekleyin:
+# Butonlara tıklayarak şarkı seçebilirsiniz
+# Veya eski yöntemle choice parametresi kullanabilirsiniz:
 /search query:eminem lose yourself choice:2
 ```
 
-**Not:** `/play` komutu sadece yerel dosya veya link kabul eder. YouTube'da arama yapmak için `/search` komutunu kullanın.
+**Not:** `/play` komutu sadece yerel dosya veya link kabul eder. YouTube'da arama yapmak için `/search` komutunu kullanın. Arama sonuçları butonlarla gösterilir ve tıklayarak seçim yapabilirsiniz.
 
 ### Playlist Oluşturma ve Yönetimi
 ```
