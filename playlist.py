@@ -172,23 +172,23 @@ class PlaylistManager:
                 break
         
         if not removed:
-            await ctx.send(f"❌ Şarkı playlist'te bulunamadı!")
+            await self._send_message(interaction, f"❌ Şarkı playlist'te bulunamadı!")
             return
         
         if self._save_playlist(playlist_name, playlist):
-            await ctx.send(f"✅ Şarkı playlist'ten çıkarıldı!")
+            await self._send_message(interaction, f"✅ Şarkı playlist'ten çıkarıldı!")
         else:
-            await ctx.send("❌ Şarkı çıkarılırken bir hata oluştu!")
+            await self._send_message(interaction, "❌ Şarkı çıkarılırken bir hata oluştu!")
     
-    async def show_playlist(self, ctx, playlist_name):
+    async def show_playlist(self, interaction, playlist_name):
         """Playlist'i göster"""
         playlist = self._load_playlist(playlist_name)
         if playlist is None:
-            await ctx.send(f"❌ **{playlist_name}** adında bir playlist bulunamadı!")
+            await self._send_message(interaction, f"❌ **{playlist_name}** adında bir playlist bulunamadı!")
             return
         
         if len(playlist['songs']) == 0:
-            await ctx.send(f"📭 **{playlist_name}** playlist'i boş!")
+            await self._send_message(interaction, f"📭 **{playlist_name}** playlist'i boş!")
             return
         
         songs_list = [f"**{playlist_name}** - {len(playlist['songs'])} şarkı\n"]
@@ -199,45 +199,49 @@ class PlaylistManager:
         if len(playlist['songs']) > 20:
             songs_list.append(f"\n... ve {len(playlist['songs']) - 20} şarkı daha")
         
-        await ctx.send("\n".join(songs_list))
+        await self._send_message(interaction, "\n".join(songs_list))
     
-    async def play_playlist(self, ctx, playlist_name, music_player):
+    async def play_playlist(self, interaction, playlist_name, music_player):
         """Playlist'i çal"""
         playlist = self._load_playlist(playlist_name)
         if playlist is None:
-            await ctx.send(f"❌ **{playlist_name}** adında bir playlist bulunamadı!")
+            await self._send_message(interaction, f"❌ **{playlist_name}** adında bir playlist bulunamadı!")
             return
         
         if len(playlist['songs']) == 0:
-            await ctx.send(f"❌ **{playlist_name}** playlist'i boş!")
+            await self._send_message(interaction, f"❌ **{playlist_name}** playlist'i boş!")
             return
         
+        author = self._get_author(interaction)
+        
         # Ses kanalı kontrolü
-        if ctx.voice_client is None:
-            if ctx.author.voice is None:
-                await ctx.send("❌ Önce bir ses kanalına katılmanız gerekiyor!")
+        voice_client = interaction.guild.voice_client
+        if voice_client is None:
+            if author.voice is None:
+                await self._send_message(interaction, "❌ Önce bir ses kanalına katılmanız gerekiyor!")
                 return
-            await ctx.author.voice.channel.connect()
+            await author.voice.channel.connect()
         
         # Tüm şarkıları kuyruğa ekle
         added_count = 0
         for song_path in playlist['songs']:
             if os.path.exists(song_path):
-                await music_player.add_to_queue(ctx, song_path, ctx.author)
+                await music_player.add_to_queue(interaction, song_path, author)
                 added_count += 1
         
-        await ctx.send(f"✅ **{playlist_name}** playlist'inden {added_count} şarkı kuyruğa eklendi!")
+        await self._send_message(interaction, f"✅ **{playlist_name}** playlist'inden {added_count} şarkı kuyruğa eklendi!")
     
-    async def add_editor(self, ctx, playlist_name, user):
+    async def add_editor(self, interaction, playlist_name, user):
         """Playlist'e düzenleme yetkisi ver"""
         playlist = self._load_playlist(playlist_name)
         if playlist is None:
-            await ctx.send(f"❌ **{playlist_name}** adında bir playlist bulunamadı!")
+            await self._send_message(interaction, f"❌ **{playlist_name}** adında bir playlist bulunamadı!")
             return
         
         # Sadece sahip yetki verebilir
-        if playlist['owner'] != str(ctx.author.id):
-            await ctx.send("❌ Bu playlist'in sahibi değilsiniz!")
+        author = self._get_author(interaction)
+        if playlist['owner'] != str(author.id):
+            await self._send_message(interaction, "❌ Bu playlist'in sahibi değilsiniz!")
             return
         
         user_id_str = str(user.id)
@@ -288,24 +292,25 @@ class PlaylistManager:
         else:
             await self._send_message(interaction, "❌ Yetki kaldırılırken bir hata oluştu!")
     
-    async def delete_playlist(self, ctx, playlist_name):
+    async def delete_playlist(self, interaction, playlist_name):
         """Playlist'i sil"""
         playlist = self._load_playlist(playlist_name)
         if playlist is None:
-            await ctx.send(f"❌ **{playlist_name}** adında bir playlist bulunamadı!")
+            await self._send_message(interaction, f"❌ **{playlist_name}** adında bir playlist bulunamadı!")
             return
         
         # Sadece sahip silebilir
-        if playlist['owner'] != str(ctx.author.id):
-            await ctx.send("❌ Bu playlist'i sadece sahibi silebilir!")
+        author = self._get_author(interaction)
+        if playlist['owner'] != str(author.id):
+            await self._send_message(interaction, "❌ Bu playlist'i sadece sahibi silebilir!")
             return
         
         path = self._get_playlist_path(playlist_name)
         try:
             os.remove(path)
-            await ctx.send(f"✅ **{playlist_name}** playlist'i silindi!")
+            await self._send_message(interaction, f"✅ **{playlist_name}** playlist'i silindi!")
         except Exception as e:
-            await ctx.send(f"❌ Playlist silinirken bir hata oluştu: {e}")
+            await self._send_message(interaction, f"❌ Playlist silinirken bir hata oluştu: {e}")
     
     async def list_playlists(self, interaction):
         """Tüm playlist'leri listele"""

@@ -47,12 +47,16 @@ brew install ffmpeg
 3. "Bot" sekmesine gidin ve bir bot oluşturun
 4. Bot token'ınızı kopyalayın
 5. "OAuth2" > "URL Generator" sekmesinden bot izinlerini seçin:
-   - `bot`
-   - `applications.commands`
-   - Bot izinleri:
+   - **Scopes:**
+     - `bot` ✅
+     - `applications.commands` ✅ (Slash komutları için ZORUNLU!)
+   - **Bot Permissions:**
      - `Connect` (Ses kanalına bağlanma)
      - `Speak` (Ses kanalında konuşma)
      - `Use Voice Activity` (Ses aktivitesi kullanma)
+     - `Use Application Commands` (Slash komutları kullanma)
+   
+   **ÖNEMLİ:** `applications.commands` scope'unu mutlaka işaretleyin! Aksi halde slash komutlar görünmez.
 
 ### 4. Proje Kurulumu
 
@@ -101,6 +105,7 @@ Bot artık Discord'un slash komut sistemini kullanıyor! Discord'da `/` yazdığ
 - `/volume [vol]` - Ses seviyesini ayarla (0-100)
 - `/clear` - Kuyruğu temizle
 - `/shuffle` - Kuyruğu karıştır
+- `/sync` - Slash komutlarını yeniden senkronize et (komutlar görünmüyorsa kullanın)
 
 ### Playlist Komutları
 
@@ -185,6 +190,13 @@ ECA_BOT/
 - Her sunucu için ayrı müzik kuyruğu yönetilir
 
 ## Sorun Giderme
+
+**Slash komutlar görünmüyor:**
+1. Discord Developer Portal'da `applications.commands` scope'unun işaretli olduğundan emin olun
+2. Botu sunucuya yeniden ekleyin (tüm izinlerle)
+3. Botu yeniden başlatın
+4. `/sync` komutunu kullanarak komutları manuel olarak senkronize edin
+5. Komutların görünmesi birkaç dakika sürebilir (Discord API gecikmesi)
 
 **Bot ses kanalına bağlanamıyor:**
 - FFmpeg'in kurulu olduğundan ve PATH'te olduğundan emin olun

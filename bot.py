@@ -33,10 +33,14 @@ async def on_ready():
     print(f'{bot.user} olarak giriş yapıldı!')
     print(f'Bot {len(bot.guilds)} sunucuda aktif')
     try:
+        # Global komutları senkronize et (tüm sunucularda görünür)
         synced = await tree.sync()
         print(f'{len(synced)} slash komutu senkronize edildi!')
+        print('Komutların Discord\'da görünmesi birkaç dakika sürebilir.')
     except Exception as e:
         print(f'Slash komut senkronizasyon hatası: {e}')
+        import traceback
+        traceback.print_exc()
 
 # ========== SES KANALI KOMUTLARI ==========
 
@@ -253,6 +257,21 @@ async def shuffle_queue(interaction: discord.Interaction):
     """Kuyruğu karıştır"""
     player = get_music_player(interaction.guild.id)
     await player.shuffle_queue(interaction)
+
+@tree.command(name='sync', description='Slash komutlarını yeniden senkronize et (sadece bot sahibi)')
+async def sync_commands(interaction: discord.Interaction):
+    """Slash komutlarını yeniden senkronize et"""
+    # Bot sahibi kontrolü (isteğe bağlı - kaldırabilirsiniz)
+    # if interaction.user.id != YOUR_USER_ID:
+    #     await interaction.response.send_message("❌ Bu komutu sadece bot sahibi kullanabilir!", ephemeral=True)
+    #     return
+    
+    await interaction.response.defer(ephemeral=True)
+    try:
+        synced = await tree.sync()
+        await interaction.followup.send(f"✅ {len(synced)} slash komutu senkronize edildi! Komutların görünmesi birkaç dakika sürebilir.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Hata: {str(e)}", ephemeral=True)
 
 # ========== PLAYLIST KOMUTLARI ==========
 
