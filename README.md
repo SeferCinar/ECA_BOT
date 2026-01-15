@@ -94,17 +94,18 @@ Bot artık Discord'un slash komut sistemini kullanıyor! Discord'da `/` yazdığ
 
 - `/join` - Botu ses kanalına çağır
 - `/leave` - Botu ses kanalından çıkar
-- `/play <query>` - Müzik çal (dosya adı, YouTube linki veya arama terimi)
-- `/search <query> [choice]` - YouTube'da şarkı ara ve seç (1-5 arası)
+- `/play query:<dosya/link>` - Müzik çal (yerel dosya veya YouTube linki)
+- `/search query:<arama> [choice:<numara>]` - YouTube'da şarkı ara ve seç (1-5 arası, choice opsiyonel)
 - `/skip` - Şarkıyı geç
 - `/stop` - Müziği durdur
 - `/pause` - Müziği duraklat
 - `/resume` - Müziği devam ettir
 - `/queue` - Kuyruğu göster
 - `/nowplaying` - Şu an çalan şarkıyı göster
-- `/volume [vol]` - Ses seviyesini ayarla (0-100)
+- `/volume [vol:<0-100>]` - Ses seviyesini ayarla
 - `/clear` - Kuyruğu temizle
 - `/shuffle` - Kuyruğu karıştır
+- `/help` - Tüm komutlar hakkında bilgi göster
 - `/sync` - Slash komutlarını yeniden senkronize et (komutlar görünmüyorsa kullanın)
 
 ### Playlist Komutları
@@ -134,17 +135,14 @@ Bot artık Discord'un slash komut sistemini kullanıyor! Discord'da `/` yazdığ
 
 ### YouTube'da Arama ve Çalma
 ```
+# Önce arama yap (sonuçları gösterir)
 /search query:eminem lose yourself
-# Sonuçları gösterir, otomatik olarak ilk sonucu seçer
-# Veya belirli bir sonucu seçmek için:
+
+# Sonuçlardan birini seçmek için choice parametresi ekleyin:
 /search query:eminem lose yourself choice:2
 ```
 
-### Otomatik Arama ile Çalma
-```
-/play query:eminem lose yourself
-# Eğer yerel dosya bulunamazsa otomatik olarak YouTube'da arar
-```
+**Not:** `/play` komutu sadece yerel dosya veya link kabul eder. YouTube'da arama yapmak için `/search` komutunu kullanın.
 
 ### Playlist Oluşturma ve Yönetimi
 ```

@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 import os
 import asyncio
+from typing import Optional
 from music import MusicPlayer
 from downloader import MusicDownloader
 from playlist import PlaylistManager
@@ -111,40 +112,17 @@ async def play(interaction: discord.Interaction, query: str):
                     file_path = test_path
                     break
             else:
-                # Yerel dosya bulunamadı, YouTube'da ara
-                await interaction.followup.send(f"🔍 YouTube'da aranıyor: {query}")
-                try:
-                    results = await downloader.search_youtube(query, max_results=5)
-                    if not results:
-                        await interaction.followup.send("❌ Arama sonucu bulunamadı!")
-                        return
-                    
-                    # İlk sonucu seç
-                    first_result = results[0]
-                    video_url = f"https://www.youtube.com/watch?v={first_result['id']}"
-                    await interaction.followup.send(f"🔽 İndiriliyor: {first_result['title']}")
-                    
-                    file_path = await downloader.download_and_save(video_url)
-                    if file_path:
-                        await player.add_to_queue(interaction, file_path, interaction.user)
-                        await interaction.followup.send(f"✅ **{first_result['title']}** kütüphaneye kaydedildi ve kuyruğa eklendi!")
-                    else:
-                        await interaction.followup.send("❌ İndirme başarısız oldu!")
-                except Exception as e:
-                    await interaction.followup.send(f"❌ Hata: {str(e)}")
+                # Yerel dosya bulunamadı
+                await interaction.followup.send(f"❌ Dosya bulunamadı: {query}\n💡 YouTube'da aramak için `/search query:{query}` komutunu kullanın!")
                 return
         
         await player.add_to_queue(interaction, file_path, interaction.user)
 
 @tree.command(name='search', description='YouTube\'da şarkı ara ve seç')
-@app_commands.describe(query='Arama terimi', choice='Seçilecek sonuç numarası (1-5)')
-async def search(interaction: discord.Interaction, query: str, choice: int = 1):
+@app_commands.describe(query='Arama terimi', choice='Seçilecek sonuç numarası (1-5, opsiyonel)')
+async def search(interaction: discord.Interaction, query: str, choice: Optional[int] = None):
     """YouTube'da şarkı ara"""
     await interaction.response.defer()
-    
-    if choice < 1 or choice > 5:
-        await interaction.followup.send("❌ Seçim 1-5 arasında olmalı!", ephemeral=True)
-        return
     
     await interaction.followup.send(f"🔍 Aranıyor: {query}")
     
@@ -156,41 +134,50 @@ async def search(interaction: discord.Interaction, query: str, choice: int = 1):
         
         # Sonuçları göster
         results_text = "🔍 **Arama Sonuçları:**\n"
+        results_text += "Bir şarkı seçmek için `/search query:<arama> choice:<numara>` komutunu kullanın.\n\n"
+        
         for i, result in enumerate(results, 1):
-            marker = "✅" if i == choice else f"{i}."
-            duration_min = result['duration'] // 60
-            duration_sec = result['duration'] % 60
-            results_text += f"{marker} {result['title']} ({duration_min}:{duration_sec:02d})\n"
+            duration_min = result['duration'] // 60 if result.get('duration') else 0
+            duration_sec = result['duration'] % 60 if result.get('duration') else 0
+            results_text += f"**{i}.** {result['title']} ({duration_min}:{duration_sec:02d})\n"
         
         await interaction.followup.send(results_text)
         
-        if choice > len(results):
-            await interaction.followup.send(f"❌ Sadece {len(results)} sonuç bulundu!")
-            return
-        
-        selected = results[choice - 1]
-        video_url = f"https://www.youtube.com/watch?v={selected['id']}"
-        
-        # Ses kanalı kontrolü
-        if interaction.guild.voice_client is None:
-            if interaction.user.voice is None:
-                await interaction.followup.send("❌ Önce bir ses kanalına katılmanız gerekiyor!")
+        # Eğer choice verilmişse, seçilen şarkıyı çal
+        if choice is not None:
+            if choice < 1 or choice > 5:
+                await interaction.followup.send("❌ Seçim 1-5 arasında olmalı!", ephemeral=True)
                 return
-            await interaction.user.voice.channel.connect()
-        
-        player = get_music_player(interaction.guild.id)
-        
-        await interaction.followup.send(f"🔽 İndiriliyor: {selected['title']}")
-        file_path = await downloader.download_and_save(video_url)
-        
-        if file_path:
-            await player.add_to_queue(interaction, file_path, interaction.user)
-            await interaction.followup.send(f"✅ **{selected['title']}** kütüphaneye kaydedildi ve kuyruğa eklendi!")
-        else:
-            await interaction.followup.send("❌ İndirme başarısız oldu!")
+            
+            if choice > len(results):
+                await interaction.followup.send(f"❌ Sadece {len(results)} sonuç bulundu!", ephemeral=True)
+                return
+            
+            selected = results[choice - 1]
+            video_url = f"https://www.youtube.com/watch?v={selected['id']}"
+            
+            # Ses kanalı kontrolü
+            if interaction.guild.voice_client is None:
+                if interaction.user.voice is None:
+                    await interaction.followup.send("❌ Önce bir ses kanalına katılmanız gerekiyor!")
+                    return
+                await interaction.user.voice.channel.connect()
+            
+            player = get_music_player(interaction.guild.id)
+            
+            await interaction.followup.send(f"🔽 İndiriliyor: {selected['title']}")
+            file_path = await downloader.download_and_save(video_url)
+            
+            if file_path:
+                await player.add_to_queue(interaction, file_path, interaction.user)
+                await interaction.followup.send(f"✅ **{selected['title']}** kütüphaneye kaydedildi ve kuyruğa eklendi!")
+            else:
+                await interaction.followup.send("❌ İndirme başarısız oldu!")
         
     except Exception as e:
         await interaction.followup.send(f"❌ Hata: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 @tree.command(name='skip', description='Şarkıyı geç')
 async def skip(interaction: discord.Interaction):
@@ -257,6 +244,92 @@ async def shuffle_queue(interaction: discord.Interaction):
     """Kuyruğu karıştır"""
     player = get_music_player(interaction.guild.id)
     await player.shuffle_queue(interaction)
+
+@tree.command(name='help', description='Tüm komutlar hakkında bilgi göster')
+async def help_command(interaction: discord.Interaction):
+    """Tüm komutlar hakkında bilgi göster"""
+    embed = discord.Embed(
+        title="🎵 Discord Müzik Botu - Komutlar",
+        description="Tüm komutlar ve kullanımları",
+        color=discord.Color.blue()
+    )
+    
+    # Ses Kanalı Komutları
+    embed.add_field(
+        name="🔊 Ses Kanalı Komutları",
+        value=(
+            "`/join` - Botu ses kanalına çağır\n"
+            "`/leave` - Botu ses kanalından çıkar"
+        ),
+        inline=False
+    )
+    
+    # Müzik Çalma Komutları
+    embed.add_field(
+        name="🎵 Müzik Çalma Komutları",
+        value=(
+            "`/play query:<dosya/link>` - Yerel dosya veya YouTube linki çal\n"
+            "`/search query:<arama> [choice:<numara>]` - YouTube'da ara ve seç\n"
+            "`/skip` - Şarkıyı geç\n"
+            "`/stop` - Müziği durdur\n"
+            "`/pause` - Müziği duraklat\n"
+            "`/resume` - Müziği devam ettir\n"
+            "`/queue` - Kuyruğu göster\n"
+            "`/nowplaying` - Şu an çalan şarkıyı göster\n"
+            "`/volume [vol:<0-100>]` - Ses seviyesini ayarla\n"
+            "`/clear` - Kuyruğu temizle\n"
+            "`/shuffle` - Kuyruğu karıştır"
+        ),
+        inline=False
+    )
+    
+    # Playlist Komutları
+    embed.add_field(
+        name="📋 Playlist Komutları",
+        value=(
+            "`/playlist action:list` - Tüm playlist'leri listele\n"
+            "`/playlist action:create name:<ad>` - Yeni playlist oluştur\n"
+            "`/playlist_add playlist_name:<ad> song:<şarkı/link>` - Playlist'e şarkı ekle\n"
+            "`/playlist_remove playlist_name:<ad> song:<şarkı>` - Playlist'ten şarkı çıkar\n"
+            "`/playlist action:show name:<ad>` - Playlist'i göster\n"
+            "`/playlist action:info name:<ad>` - Playlist bilgilerini göster\n"
+            "`/playlist action:play name:<ad>` - Playlist'i çal\n"
+            "`/playlist action:delete name:<ad>` - Playlist'i sil\n"
+            "`/playlist_editor action:add playlist_name:<ad> user:<kullanıcı>` - Düzenleme yetkisi ver\n"
+            "`/playlist_editor action:remove playlist_name:<ad> user:<kullanıcı>` - Düzenleme yetkisini kaldır"
+        ),
+        inline=False
+    )
+    
+    # Yardımcı Komutlar
+    embed.add_field(
+        name="🛠️ Yardımcı Komutlar",
+        value=(
+            "`/help` - Bu yardım mesajını göster\n"
+            "`/sync` - Slash komutlarını yeniden senkronize et"
+        ),
+        inline=False
+    )
+    
+    # Kullanım Örnekleri
+    embed.add_field(
+        name="📖 Kullanım Örnekleri",
+        value=(
+            "```\n"
+            "/play query:şarkı.mp3\n"
+            "/play query:https://youtube.com/watch?v=...\n"
+            "/search query:eminem lose yourself\n"
+            "/search query:eminem lose yourself choice:2\n"
+            "/playlist action:create name:favorilerim\n"
+            "/playlist_add playlist_name:favorilerim song:şarkı.mp3\n"
+            "```"
+        ),
+        inline=False
+    )
+    
+    embed.set_footer(text="Bot geliştirildi: ECA_BOT")
+    
+    await interaction.response.send_message(embed=embed)
 
 @tree.command(name='sync', description='Slash komutlarını yeniden senkronize et (sadece bot sahibi)')
 async def sync_commands(interaction: discord.Interaction):
