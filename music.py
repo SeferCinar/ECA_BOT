@@ -1,0 +1,214 @@
+import discord
+from discord.ext import commands
+import asyncio
+from collections import deque
+import os
+
+class MusicPlayer:
+    def __init__(self, bot):
+        self.bot = bot
+        self.queue = deque()
+        self.current = None
+        self.volume = 0.5
+        self.is_playing = False
+        self.is_paused = False
+        self.voice_client = None
+        self.current_user = None
+    
+    def _get_voice_client(self, interaction):
+        """Interaction'dan voice client al"""
+        return interaction.guild.voice_client
+    
+    def _send_message(self, interaction, message, ephemeral=False):
+        """Mesaj gönder (hem interaction hem de ctx destekler)"""
+        if hasattr(interaction, 'response') and not interaction.response.is_done():
+            return interaction.response.send_message(message, ephemeral=ephemeral)
+        elif hasattr(interaction, 'followup'):
+            return interaction.followup.send(message, ephemeral=ephemeral)
+        else:
+            return interaction.send(message)
+    
+    async def add_to_queue(self, interaction, file_path, user):
+        """Kuyruğa şarkı ekle"""
+        if not os.path.exists(file_path):
+            await self._send_message(interaction, f"❌ Dosya bulunamadı: {file_path}")
+            return
+        
+        song_name = os.path.basename(file_path)
+        self.queue.append({
+            'file': file_path,
+            'name': song_name,
+            'user': user
+        })
+        
+        await self._send_message(interaction, f"✅ **{song_name}** kuyruğa eklendi!")
+        
+        if not self.is_playing and not self.is_paused:
+            await self.play_next(interaction)
+    
+    async def play_next(self, interaction):
+        """Sıradaki şarkıyı çal"""
+        if self.is_paused:
+            return
+        
+        if len(self.queue) == 0:
+            self.is_playing = False
+            self.current = None
+            await self._send_message(interaction, "📭 Kuyruk boş!")
+            return
+        
+        self.current = self.queue.popleft()
+        self.is_playing = True
+        
+        voice_client = self._get_voice_client(interaction)
+        if voice_client is None:
+            await self._send_message(interaction, "❌ Ses kanalına bağlı değilim!")
+            return
+        
+        self.voice_client = voice_client
+        
+        # FFmpeg source oluştur
+        source = discord.FFmpegPCMAudio(
+            self.current['file'],
+            options='-vn'
+        )
+        
+        # Volume ayarla
+        source = discord.PCMVolumeTransformer(source, volume=self.volume)
+        
+        # Çal
+        self.voice_client.play(
+            source,
+            after=lambda e: asyncio.run_coroutine_threadsafe(
+                self.play_next(interaction),
+                self.bot.loop
+            ) if e is None else None
+        )
+        
+        await self._send_message(interaction, f"🎵 Şimdi çalıyor: **{self.current['name']}** (İsteyen: {self.current['user'].mention})")
+    
+    async def skip(self, interaction):
+        """Şarkıyı geç"""
+        if not self.is_playing:
+            await self._send_message(interaction, "❌ Şu anda hiçbir şarkı çalmıyor!")
+            return
+        
+        if self.voice_client:
+            self.voice_client.stop()
+        
+        await self._send_message(interaction, "⏭️ Şarkı geçildi!")
+        await self.play_next(interaction)
+    
+    async def stop(self, interaction):
+        """Müziği durdur"""
+        if not self.is_playing and not self.is_paused:
+            await self._send_message(interaction, "❌ Şu anda hiçbir şarkı çalmıyor!")
+            return
+        
+        self.queue.clear()
+        if self.voice_client:
+            self.voice_client.stop()
+        
+        self.is_playing = False
+        self.is_paused = False
+        self.current = None
+        await self._send_message(interaction, "⏹️ Müzik durduruldu ve kuyruk temizlendi!")
+    
+    async def pause(self, interaction):
+        """Müziği duraklat"""
+        if not self.is_playing:
+            await self._send_message(interaction, "❌ Şu anda hiçbir şarkı çalmıyor!")
+            return
+        
+        if self.is_paused:
+            await self._send_message(interaction, "❌ Müzik zaten duraklatılmış!")
+            return
+        
+        if self.voice_client:
+            self.voice_client.pause()
+        
+        self.is_paused = True
+        await self._send_message(interaction, "⏸️ Müzik duraklatıldı!")
+    
+    async def resume(self, interaction):
+        """Müziği devam ettir"""
+        if not self.is_paused:
+            await self._send_message(interaction, "❌ Müzik duraklatılmamış!")
+            return
+        
+        if self.voice_client:
+            self.voice_client.resume()
+        
+        self.is_paused = False
+        await self._send_message(interaction, "▶️ Müzik devam ediyor!")
+    
+    async def show_queue(self, interaction):
+        """Kuyruğu göster"""
+        if len(self.queue) == 0 and self.current is None:
+            await self._send_message(interaction, "📭 Kuyruk boş!")
+            return
+        
+        queue_list = []
+        if self.current:
+            queue_list.append(f"🎵 **Şimdi çalıyor:** {self.current['name']}")
+        
+        if len(self.queue) > 0:
+            queue_list.append("\n📋 **Kuyruk:**")
+            for i, song in enumerate(list(self.queue)[:10], 1):
+                queue_list.append(f"{i}. {song['name']}")
+            
+            if len(self.queue) > 10:
+                queue_list.append(f"... ve {len(self.queue) - 10} şarkı daha")
+        
+        await self._send_message(interaction, "\n".join(queue_list))
+    
+    async def now_playing(self, interaction):
+        """Şu an çalan şarkıyı göster"""
+        if self.current is None:
+            await self._send_message(interaction, "❌ Şu anda hiçbir şarkı çalmıyor!")
+            return
+        
+        status = "⏸️ Duraklatıldı" if self.is_paused else "▶️ Çalıyor"
+        await self._send_message(interaction,
+            f"{status}\n"
+            f"🎵 **{self.current['name']}**\n"
+            f"👤 İsteyen: {self.current['user'].mention}"
+        )
+    
+    def get_volume(self):
+        """Mevcut ses seviyesini al"""
+        return int(self.volume * 100)
+    
+    async def set_volume(self, interaction, volume):
+        """Ses seviyesini ayarla"""
+        self.volume = volume
+        if self.voice_client and self.voice_client.source:
+            self.voice_client.source.volume = volume
+    
+    async def clear_queue(self, interaction):
+        """Kuyruğu temizle"""
+        count = len(self.queue)
+        self.queue.clear()
+        await self._send_message(interaction, f"🗑️ Kuyruktan {count} şarkı silindi!")
+    
+    async def shuffle_queue(self, interaction):
+        """Kuyruğu karıştır"""
+        if len(self.queue) < 2:
+            await self._send_message(interaction, "❌ Karıştırmak için en az 2 şarkı olmalı!")
+            return
+        
+        import random
+        queue_list = list(self.queue)
+        random.shuffle(queue_list)
+        self.queue = deque(queue_list)
+        await self._send_message(interaction, "🔀 Kuyruk karıştırıldı!")
+    
+    def cleanup(self):
+        """Temizlik"""
+        if self.voice_client:
+            self.voice_client.stop()
+        self.queue.clear()
+        self.is_playing = False
+        self.is_paused = False
+        self.current = None
+
