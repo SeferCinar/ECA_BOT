@@ -83,10 +83,8 @@ PLAYLISTS_DIR=playlists
 # Chrome: yt-dlp --cookies-from-browser chrome --cookies cookies/cookies.txt
 # Firefox: yt-dlp --cookies-from-browser firefox --cookies cookies/cookies.txt
 # Edge: yt-dlp --cookies-from-browser edge --cookies cookies/cookies.txt
-# Farklı bir yol kullanmak isterseniz:
+# Farklı bir yol kullanmak isterseniz .env içinde:
 # YOUTUBE_COOKIES_FILE=cookies/cookies.txt
-# VEYA browser'dan otomatik çekmek için (daha az güvenilir):
-# YOUTUBE_COOKIES_BROWSER=chrome
 ```
 
 **Not:** `MUSIC_DIR` ve `PLAYLISTS_DIR` değerleri proje dizinine göre otomatik olarak ayarlanır. Sadece klasör adını belirtmeniz yeterlidir (örn: `music`, `playlists`). Bu klasörler projenin bulunduğu dizinde otomatik olarak oluşturulur.

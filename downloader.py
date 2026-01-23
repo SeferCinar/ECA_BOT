@@ -30,22 +30,14 @@ class MusicDownloader:
     
     def _add_cookie_support(self):
         """Cookie desteği ekle - YouTube bot algılamasını önlemek için"""
-        # Cookie dosyası kontrolü
+        # Cookie dosyası kontrolü (sadece dosyadan okur)
         cookie_file = Config.YOUTUBE_COOKIES_FILE
         
         if cookie_file and os.path.exists(cookie_file):
             self.ydl_opts['cookiefile'] = cookie_file
             print(f"✅ Cookie dosyası yüklendi: {cookie_file}")
-        # Browser'dan cookie çekme
-        elif Config.YOUTUBE_COOKIES_BROWSER:
-            browser = Config.YOUTUBE_COOKIES_BROWSER.lower()
-            if browser in ['chrome', 'firefox', 'edge', 'safari', 'opera', 'brave', 'vivaldi']:
-                try:
-                    print(f"⚠️  Browser cookie desteği: {browser} (cookie dosyası kullanmanız önerilir)")
-                except Exception as e:
-                    print(f"⚠️  Browser cookie hatası: {e}")
         else:
-            print("⚠️  Cookie dosyası belirtilmemiş. YouTube bot algılaması sorunları yaşanabilir.")
+            print("⚠️  Cookie dosyası belirtilmemiş veya bulunamadı. YouTube bot algılaması sorunları yaşanabilir.")
             print(f"💡 Cookie dosyası oluşturmak için: yt-dlp --cookies-from-browser chrome --cookies {Config.COOKIES_DIR}/cookies.txt")
     
     async def download_and_save(self, url):
