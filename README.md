@@ -78,11 +78,13 @@ MUSIC_DIR=music
 PLAYLISTS_DIR=playlists
 
 # YouTube Cookie Desteği (Bot algılamasını önlemek için - OPSİYONEL)
+# Cookie dosyası otomatik olarak cookies/cookies.txt yolundan okunur
 # Cookie dosyası oluşturmak için aşağıdaki komutları kullanın:
-# Chrome: yt-dlp --cookies-from-browser chrome --cookies cookies.txt
-# Firefox: yt-dlp --cookies-from-browser firefox --cookies cookies.txt
-# Edge: yt-dlp --cookies-from-browser edge --cookies cookies.txt
-YOUTUBE_COOKIES_FILE=cookies.txt
+# Chrome: yt-dlp --cookies-from-browser chrome --cookies cookies/cookies.txt
+# Firefox: yt-dlp --cookies-from-browser firefox --cookies cookies/cookies.txt
+# Edge: yt-dlp --cookies-from-browser edge --cookies cookies/cookies.txt
+# Farklı bir yol kullanmak isterseniz:
+# YOUTUBE_COOKIES_FILE=cookies/cookies.txt
 # VEYA browser'dan otomatik çekmek için (daha az güvenilir):
 # YOUTUBE_COOKIES_BROWSER=chrome
 ```
@@ -94,20 +96,24 @@ YOUTUBE_COOKIES_FILE=cookies.txt
 YouTube bot algılaması sorunlarını önlemek için cookie dosyası oluşturmanız önerilir:
 
 ```bash
+# cookies klasörü otomatik oluşturulur, ama elle de oluşturabilirsiniz
+mkdir -p cookies
+
 # Chrome'dan cookie çek
-yt-dlp --cookies-from-browser chrome --cookies cookies.txt
+yt-dlp --cookies-from-browser chrome --cookies cookies/cookies.txt
 
 # VEYA Firefox'tan
-yt-dlp --cookies-from-browser firefox --cookies cookies.txt
+yt-dlp --cookies-from-browser firefox --cookies cookies/cookies.txt
 
 # VEYA Edge'den
-yt-dlp --cookies-from-browser edge --cookies cookies.txt
+yt-dlp --cookies-from-browser edge --cookies cookies/cookies.txt
 ```
 
 **Önemli:** 
-- Cookie dosyası (`cookies.txt`) hassas bilgiler içerir ve `.gitignore`'a eklenmiştir.
+- Cookie dosyası `cookies/` klasörüne kaydedilir ve `.gitignore`'a eklenmiştir.
 - Cookie dosyasını asla GitHub'a yüklemeyin!
-- Cookie dosyası oluşturduktan sonra `.env` dosyasında `YOUTUBE_COOKIES_FILE=cookies.txt` olarak belirtin.
+- Cookie dosyası otomatik olarak `cookies/cookies.txt` yolundan okunur.
+- Farklı bir yol kullanmak isterseniz `.env` dosyasında `YOUTUBE_COOKIES_FILE=cookies/cookies.txt` olarak belirtebilirsiniz.
 
 ### 5. Botu Çalıştırma
 
@@ -158,13 +164,13 @@ docker run -d \
   --env-file .env \
   -v $(pwd)/music:/app/music \
   -v $(pwd)/playlists:/app/playlists \
-  -v $(pwd)/cookies.txt:/app/cookies.txt \
+  -v $(pwd)/cookies:/app/cookies \
   eca-discord-bot
 ```
 
-**Not:** Docker kullanırken `music/`, `playlists/` ve `cookies.txt` dosyası volume olarak bağlanır, böylece veriler container yeniden başlatıldığında korunur.
+**Not:** Docker kullanırken `music/`, `playlists/` ve `cookies/` klasörleri volume olarak bağlanır, böylece veriler container yeniden başlatıldığında korunur.
 
-**Cookie Dosyası:** Eğer cookie dosyası kullanıyorsanız, dosyayı container içine mount etmeyi unutmayın. Cookie dosyası yoksa bu satırı atlayabilirsiniz.
+**Cookie Dosyası:** Cookie dosyası `cookies/` klasörüne kaydedilir ve otomatik olarak okunur. Cookie dosyası yoksa bot çalışmaya devam eder ancak YouTube bot algılaması sorunları yaşanabilir.
 
 ## Komutlar
 

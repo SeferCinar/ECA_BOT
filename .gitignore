@@ -27,6 +27,7 @@ wheels/
 .env
 
 # YouTube cookies (contains sensitive authentication data)
+cookies/
 cookies.txt
 *.cookies
 

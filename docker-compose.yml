@@ -11,6 +11,8 @@ services:
       # Persist music and playlists
       - ./music:/app/music
       - ./playlists:/app/playlists
+      # Cookies directory
+      - ./cookies:/app/cookies
       # YouTube cookies (optional - only if you have cookies.txt file)
       # Uncomment the line below if you have a cookies.txt file
       # - ./cookies.txt:/app/cookies.txt
