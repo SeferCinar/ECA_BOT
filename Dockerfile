@@ -7,8 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopus0 \
     libopus-dev \
     curl \
+    ca-certificates \
+    gnupg \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
+    && node --version \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory

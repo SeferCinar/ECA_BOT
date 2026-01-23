@@ -4,6 +4,7 @@ import sys
 import asyncio
 import subprocess
 import json
+import shutil
 from config import Config
 
 class MusicDownloader:
@@ -17,6 +18,9 @@ class MusicDownloader:
         
         # Cookie dosyası yolunu belirle
         self.cookie_file = self._find_cookie_file()
+
+        # Node.js runtime kontrolü (yt-dlp için gerekli olabilir)
+        self._check_node_runtime()
         
         # yt-dlp ayarları - YouTube bot algılamasını önlemek için özel ayarlar
         self.ydl_opts = {
@@ -35,6 +39,20 @@ class MusicDownloader:
         
         # Cookie desteği ekle (bot algılamasını önlemek için)
         self._add_cookie_support()
+
+    def _check_node_runtime(self):
+        """Node.js var mı kontrol et (Coolify/Docker ortamında teşhis için)"""
+        node_path = shutil.which("node")
+        if not node_path:
+            print("⚠️ Node.js bulunamadı. yt-dlp bazı videolarda JS runtime isteyebilir.", flush=True)
+            return
+        try:
+            result = subprocess.run([node_path, "--version"], capture_output=True, text=True, timeout=5)
+            ver = (result.stdout or result.stderr).strip()
+            if ver:
+                print(f"✅ Node.js bulundu: {ver}", flush=True)
+        except Exception as e:
+            print(f"⚠️ Node.js kontrolü başarısız: {e}", flush=True)
     
     def _find_cookie_file(self):
         """Cookie dosyasını bul"""

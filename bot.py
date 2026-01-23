@@ -3,6 +3,8 @@ from discord import app_commands
 from discord.ext import commands
 import os
 import asyncio
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Optional
 from music import MusicPlayer
 from downloader import MusicDownloader
@@ -22,6 +24,43 @@ tree = bot.tree  # Slash komutları için
 music_players = {}
 downloader = MusicDownloader()
 playlist_manager = PlaylistManager()
+
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path in ("/", "/health", "/healthz"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"OK")
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        # Coolify loglarını şişirmemek için HTTP loglarını kapat
+        return
+
+def _start_health_server_if_enabled():
+    enabled = os.getenv("ENABLE_HEALTH_SERVER", "").strip().lower() in ("1", "true", "yes", "on")
+    if not enabled:
+        return
+
+    port_str = (os.getenv("PORT") or os.getenv("HEALTHCHECK_PORT") or "8080").strip()
+    try:
+        port = int(port_str)
+    except ValueError:
+        print(f"⚠️ Health server port geçersiz: {port_str!r}", flush=True)
+        return
+
+    try:
+        server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    except OSError as e:
+        print(f"⚠️ Health server başlatılamadı (port {port}): {e}", flush=True)
+        return
+
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    print(f"✅ Health server aktif: http://0.0.0.0:{port}/health", flush=True)
 
 def get_music_player(guild_id):
     """Guild için müzik player'ı al veya oluştur"""
@@ -522,4 +561,9 @@ async def playlist_editor(interaction: discord.Interaction, action: str, playlis
 
 # Botu çalıştır
 if __name__ == '__main__':
+    if not Config.TOKEN:
+        print("❌ DISCORD_TOKEN bulunamadı. Coolify -> Environment Variables bölümüne DISCORD_TOKEN ekleyin.", flush=True)
+        raise SystemExit(1)
+
+    _start_health_server_if_enabled()
     bot.run(Config.TOKEN)

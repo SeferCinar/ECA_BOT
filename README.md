@@ -205,6 +205,17 @@ Coolify'da environment variables ayarlayın:
 - `DISCORD_TOKEN`: Discord bot token'ınız
 - `YOUTUBE_COOKIES_FILE`: `/app/cookies/cookies.txt` (opsiyonel, otomatik algılanır)
 
+### 3.5. Coolify Healthcheck / Port Sorunu (Önemli)
+
+Coolify bazı kurulumlarda uygulamayı "healthy" saymak için bir **port** üzerinden cevap bekleyebilir. Bu bot normalde port açmaz.
+
+Eğer Coolify'da uygulama "unhealthy" görünüp restart döngüsüne giriyorsa şu env'leri ekleyin:
+- `ENABLE_HEALTH_SERVER=1`
+- `PORT=8080` (veya Coolify'nın beklediği port)
+
+Sonra health endpoint:
+- `/health` veya `/healthz`
+
 ### 4. Cookie Dosyası Oluşturma
 
 Cookie dosyasını yerel bilgisayarınızda oluşturup Coolify'a yükleyin:
