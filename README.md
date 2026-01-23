@@ -170,6 +170,54 @@ docker run -d \
 
 **Cookie Dosyası:** Cookie dosyası `cookies/` klasörüne kaydedilir ve otomatik olarak okunur. Cookie dosyası yoksa bot çalışmaya devam eder ancak YouTube bot algılaması sorunları yaşanabilir.
 
+## ☁️ Coolify ile Deploy
+
+Coolify kullanarak botu deploy etmek için:
+
+### 1. Coolify'da Uygulama Oluşturma
+
+1. Coolify dashboard'unda yeni bir uygulama oluşturun
+2. GitHub repository'nizi bağlayın
+3. Docker Compose veya Dockerfile kullanarak deploy edin
+
+### 2. Cookie Dosyasını Yükleme (Coolify)
+
+Coolify'da cookie dosyasını yüklemek için iki yöntem var:
+
+**Yöntem 1: Coolify File Manager (Önerilen)**
+1. Coolify dashboard'unda uygulamanıza gidin
+2. "File Manager" veya "Storage" sekmesine gidin
+3. `cookies` klasörünü oluşturun (yoksa)
+4. `cookies.txt` dosyasını `cookies/` klasörüne yükleyin
+5. Dosya yolu: `/app/cookies/cookies.txt` olmalı
+
+**Yöntem 2: Persistent Volume Mount**
+1. Coolify'da uygulamanızın "Volumes" ayarlarına gidin
+2. Yeni bir persistent volume ekleyin:
+   - **Host Path:** `/data/cookies` (veya istediğiniz bir yol)
+   - **Container Path:** `/app/cookies`
+3. Cookie dosyasını host path'e yükleyin
+4. Container içinde `/app/cookies/cookies.txt` olarak erişilebilir olmalı
+
+### 3. Environment Variables
+
+Coolify'da environment variables ayarlayın:
+- `DISCORD_TOKEN`: Discord bot token'ınız
+- `YOUTUBE_COOKIES_FILE`: `/app/cookies/cookies.txt` (opsiyonel, otomatik algılanır)
+
+### 4. Cookie Dosyası Oluşturma
+
+Cookie dosyasını yerel bilgisayarınızda oluşturup Coolify'a yükleyin:
+
+```bash
+# Yerel bilgisayarınızda
+yt-dlp --cookies-from-browser chrome --cookies cookies.txt
+
+# Sonra Coolify File Manager'dan cookies/ klasörüne yükleyin
+```
+
+**Önemli:** Cookie dosyası formatı Netscape formatında olmalı (ilk satır `# Netscape HTTP Cookie File` ile başlamalı).
+
 ## Komutlar
 
 Bot artık Discord'un slash komut sistemini kullanıyor! Discord'da `/` yazdığınızda tüm komutları görebilirsiniz.

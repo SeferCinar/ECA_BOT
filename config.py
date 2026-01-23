@@ -1,4 +1,5 @@
 import os
+import sys
 from dotenv import load_dotenv
 
 # .env dosyasını yükle
@@ -23,25 +24,32 @@ class Config:
     # Cookie dosyalarının saklanacağı klasör (proje dizinine göre)
     COOKIES_DIR = os.path.join(BASE_DIR, 'cookies')
     
-    # YouTube cookie dosyası yolu (opsiyonel - bot algılamasını önlemek için)
-    # Cookie dosyasını yt-dlp ile export edebilirsiniz:
-    #   yt-dlp --cookies-from-browser chrome --cookies cookies/cookies.txt
+    # YouTube cookie dosyası yolu - .env'den veya None
     YOUTUBE_COOKIES_FILE = os.getenv('YOUTUBE_COOKIES_FILE', None)
     
-    # Cookie dosyası yolunu işle (sadece dosyadan okur, browser'dan otomatik çekmeye çalışmaz)
-    if YOUTUBE_COOKIES_FILE is None:
-        # Varsayılan olarak cookies/cookies.txt kullan
-        default_cookie_path = os.path.join(COOKIES_DIR, 'cookies.txt')
-        print(f"🔍 Cookie dosyası aranıyor: {default_cookie_path}")
-        print(f"🔍 BASE_DIR: {BASE_DIR}")
-        print(f"🔍 COOKIES_DIR: {COOKIES_DIR}")
-        if os.path.exists(default_cookie_path):
-            YOUTUBE_COOKIES_FILE = default_cookie_path
-            print(f"✅ Cookie dosyası bulundu: {YOUTUBE_COOKIES_FILE}")
-        else:
-            print(f"⚠️  Cookie dosyası bulunamadı: {default_cookie_path}")
-    elif not os.path.isabs(YOUTUBE_COOKIES_FILE):
-        # Relative path ise BASE_DIR'e göre çöz
-        YOUTUBE_COOKIES_FILE = os.path.join(BASE_DIR, YOUTUBE_COOKIES_FILE)
-        print(f"🔍 Cookie dosyası yolu çözümlendi: {YOUTUBE_COOKIES_FILE}")
+    @classmethod
+    def get_cookie_file(cls):
+        """Cookie dosyası yolunu dinamik olarak belirle"""
+        # Önce environment variable kontrolü
+        env_cookie = os.getenv('YOUTUBE_COOKIES_FILE', None)
+        if env_cookie:
+            if os.path.isabs(env_cookie):
+                return env_cookie if os.path.exists(env_cookie) else None
+            else:
+                full_path = os.path.join(BASE_DIR, env_cookie)
+                return full_path if os.path.exists(full_path) else None
+        
+        # Varsayılan yolları kontrol et
+        possible_paths = [
+            os.path.join(cls.COOKIES_DIR, 'cookies.txt'),
+            os.path.join(BASE_DIR, 'cookies', 'cookies.txt'),
+            '/app/cookies/cookies.txt',
+            'cookies/cookies.txt',
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                return path
+        
+        return None
 
