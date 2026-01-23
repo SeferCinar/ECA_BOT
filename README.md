@@ -86,6 +86,54 @@ PLAYLISTS_DIR=playlists
 python bot.py
 ```
 
+## 🐳 Docker ile Çalıştırma
+
+Docker kullanarak botu çalıştırmak için aşağıdaki adımları izleyin:
+
+### 1. Ön Gereksinimler
+
+- [Docker](https://docs.docker.com/get-docker/) kurulu olmalı
+- [Docker Compose](https://docs.docker.com/compose/install/) kurulu olmalı
+
+### 2. .env Dosyasını Hazırlayın
+
+```bash
+# .env dosyasını oluşturun
+cp .env.example .env
+
+# .env dosyasını düzenleyin ve bot token'ınızı ekleyin
+```
+
+### 3. Docker Compose ile Başlatma
+
+```bash
+# Botu oluştur ve başlat
+docker-compose up -d --build
+
+# Logları izle
+docker-compose logs -f
+
+# Botu durdur
+docker-compose down
+```
+
+### 4. Manuel Docker Kullanımı
+
+```bash
+# Image oluştur
+docker build -t eca-discord-bot .
+
+# Container başlat
+docker run -d \
+  --name eca-discord-bot \
+  --env-file .env \
+  -v $(pwd)/music:/app/music \
+  -v $(pwd)/playlists:/app/playlists \
+  eca-discord-bot
+```
+
+**Not:** Docker kullanırken `music/` ve `playlists/` klasörleri volume olarak bağlanır, böylece veriler container yeniden başlatıldığında korunur.
+
 ## Komutlar
 
 Bot artık Discord'un slash komut sistemini kullanıyor! Discord'da `/` yazdığınızda tüm komutları görebilirsiniz.

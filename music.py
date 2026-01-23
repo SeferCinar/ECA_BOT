@@ -29,7 +29,7 @@ class MusicPlayer:
             return interaction.send(message)
     
     async def add_to_queue(self, interaction, file_path, user):
-        """Kuyruğa şarkı ekle"""
+        """Kuyruğa şarkı ekle (yerel dosya)"""
         if not os.path.exists(file_path):
             await self._send_message(interaction, f"❌ Dosya bulunamadı: {file_path}")
             return
@@ -38,10 +38,26 @@ class MusicPlayer:
         self.queue.append({
             'file': file_path,
             'name': song_name,
-            'user': user
+            'user': user,
+            'is_stream': False
         })
         
         await self._send_message(interaction, f"✅ **{song_name}** kuyruğa eklendi!")
+        
+        if not self.is_playing and not self.is_paused:
+            await self.play_next(interaction)
+    
+    async def add_stream_to_queue(self, interaction, stream_info, user):
+        """Kuyruğa stream ekle (indirmeden)"""
+        self.queue.append({
+            'stream_url': stream_info['url'],
+            'name': stream_info['title'],
+            'user': user,
+            'is_stream': True,
+            'webpage_url': stream_info.get('webpage_url', '')
+        })
+        
+        await self._send_message(interaction, f"✅ **{stream_info['title']}** kuyruğa eklendi! (🌐 Stream)")
         
         if not self.is_playing and not self.is_paused:
             await self.play_next(interaction)
@@ -67,11 +83,25 @@ class MusicPlayer:
         
         self.voice_client = voice_client
         
-        # FFmpeg source oluştur
-        source = discord.FFmpegPCMAudio(
-            self.current['file'],
-            options='-vn'
-        )
+        # Stream mi yoksa yerel dosya mı kontrol et
+        if self.current.get('is_stream', False):
+            # Stream için FFmpeg ayarları
+            ffmpeg_options = {
+                'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+                'options': '-vn'
+            }
+            source = discord.FFmpegPCMAudio(
+                self.current['stream_url'],
+                **ffmpeg_options
+            )
+            source_type = "🌐"
+        else:
+            # Yerel dosya için FFmpeg source
+            source = discord.FFmpegPCMAudio(
+                self.current['file'],
+                options='-vn'
+            )
+            source_type = "📁"
         
         # Volume ayarla
         source = discord.PCMVolumeTransformer(source, volume=self.volume)
@@ -85,7 +115,7 @@ class MusicPlayer:
             ) if e is None else None
         )
         
-        await self._send_message(interaction, f"🎵 Şimdi çalıyor: **{self.current['name']}** (İsteyen: {self.current['user'].mention})")
+        await self._send_message(interaction, f"{source_type} Şimdi çalıyor: **{self.current['name']}** (İsteyen: {self.current['user'].mention})")
     
     async def skip(self, interaction):
         """Şarkıyı geç"""

@@ -84,16 +84,16 @@ class SearchView(discord.ui.View):
         
         video_url = f"https://www.youtube.com/watch?v={self.selected['id']}"
         
-        await interaction.followup.send(f"🔽 İndiriliyor: {self.selected['title']}")
+        # Stream (varsayılan - indirmeden çal)
+        await interaction.followup.send(f"🌐 Stream hazırlanıyor: {self.selected['title']}")
         
         try:
-            file_path = await self.downloader.download_and_save(video_url)
+            stream_info = await self.downloader.get_stream_url(video_url)
             
-            if file_path:
-                await player.add_to_queue(interaction, file_path, interaction.user)
-                await interaction.followup.send(f"✅ **{self.selected['title']}** kütüphaneye kaydedildi ve kuyruğa eklendi!")
+            if stream_info:
+                await player.add_stream_to_queue(interaction, stream_info, interaction.user)
             else:
-                await interaction.followup.send("❌ İndirme başarısız oldu!")
+                await interaction.followup.send("❌ Stream alınamadı!")
         except Exception as e:
             await interaction.followup.send(f"❌ Hata: {str(e)}")
     
@@ -154,10 +154,10 @@ async def leave(interaction: discord.Interaction):
 
 # ========== MÜZİK ÇALMA KOMUTLARI ==========
 
-@tree.command(name='play', description='Müzik çal (dosya adı, link veya arama)')
-@app_commands.describe(query='Şarkı adı, YouTube linki veya arama terimi')
-async def play(interaction: discord.Interaction, query: str):
-    """Yerel dosyadan, linkten veya aramadan müzik çal"""
+@tree.command(name='play', description='Müzik çal (dosya adı veya link - varsayılan stream)')
+@app_commands.describe(query='Şarkı adı veya YouTube linki', download='True ise indir ve kaydet, False ise sadece stream (varsayılan: False)')
+async def play(interaction: discord.Interaction, query: str, download: bool = False):
+    """Yerel dosyadan veya linkten müzik çal (varsayılan: stream)"""
     await interaction.response.defer()
     
     if interaction.guild.voice_client is None:
@@ -170,16 +170,29 @@ async def play(interaction: discord.Interaction, query: str):
     
     # Link kontrolü
     if query.startswith(('http://', 'https://', 'www.')):
-        await interaction.followup.send(f"🔽 İndiriliyor: {query}")
-        try:
-            file_path = await downloader.download_and_save(query)
-            if file_path:
-                await player.add_to_queue(interaction, file_path, interaction.user)
-                await interaction.followup.send(f"✅ Kütüphaneye kaydedildi ve kuyruğa eklendi!")
-            else:
-                await interaction.followup.send("❌ İndirme başarısız oldu!")
-        except Exception as e:
-            await interaction.followup.send(f"❌ Hata: {str(e)}")
+        if download:
+            # İndir ve kaydet
+            await interaction.followup.send(f"🔽 İndiriliyor: {query}")
+            try:
+                file_path = await downloader.download_and_save(query)
+                if file_path:
+                    await player.add_to_queue(interaction, file_path, interaction.user)
+                    await interaction.followup.send(f"✅ Kütüphaneye kaydedildi ve kuyruğa eklendi!")
+                else:
+                    await interaction.followup.send("❌ İndirme başarısız oldu!")
+            except Exception as e:
+                await interaction.followup.send(f"❌ Hata: {str(e)}")
+        else:
+            # Stream (varsayılan)
+            await interaction.followup.send(f"🌐 Stream hazırlanıyor: {query}")
+            try:
+                stream_info = await downloader.get_stream_url(query)
+                if stream_info:
+                    await player.add_stream_to_queue(interaction, stream_info, interaction.user)
+                else:
+                    await interaction.followup.send("❌ Stream alınamadı!")
+            except Exception as e:
+                await interaction.followup.send(f"❌ Hata: {str(e)}")
     else:
         # Önce yerel dosya kontrolü
         file_path = os.path.join(Config.MUSIC_DIR, query)
@@ -258,14 +271,14 @@ async def search(interaction: discord.Interaction, query: str, choice: Optional[
             
             player = get_music_player(interaction.guild.id)
             
-            await interaction.followup.send(f"🔽 İndiriliyor: {selected['title']}")
-            file_path = await downloader.download_and_save(video_url)
+            # Stream (varsayılan)
+            await interaction.followup.send(f"🌐 Stream hazırlanıyor: {selected['title']}")
+            stream_info = await downloader.get_stream_url(video_url)
             
-            if file_path:
-                await player.add_to_queue(interaction, file_path, interaction.user)
-                await interaction.followup.send(f"✅ **{selected['title']}** kütüphaneye kaydedildi ve kuyruğa eklendi!")
+            if stream_info:
+                await player.add_stream_to_queue(interaction, stream_info, interaction.user)
             else:
-                await interaction.followup.send("❌ İndirme başarısız oldu!")
+                await interaction.followup.send("❌ Stream alınamadı!")
         
     except Exception as e:
         await interaction.followup.send(f"❌ Hata: {str(e)}")
@@ -361,8 +374,8 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="🎵 Müzik Çalma Komutları",
         value=(
-            "`/play query:<dosya/link>` - Yerel dosya veya YouTube linki çal\n"
-            "`/search query:<arama> [choice:<numara>]` - YouTube'da ara ve butonlarla seç\n"
+            "`/play query:<dosya/link> [download:True]` - Yerel dosya veya link çal (varsayılan: stream)\n"
+            "`/search query:<arama>` - YouTube'da ara ve stream et\n"
             "`/skip` - Şarkıyı geç\n"
             "`/stop` - Müziği durdur\n"
             "`/pause` - Müziği duraklat\n"

@@ -46,3 +46,17 @@ playlists/
 .DS_Store
 Thumbs.db
 
+# Docker
+*.tar
+
+.mp3
+.ogg
+.wav
+.m4a
+.flac
+.mp4
+.mpg
+.mpeg
+.avi
+.mov
+.wmv

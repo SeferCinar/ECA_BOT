@@ -1,0 +1,19 @@
+services:
+  discord-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: eca-discord-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Persist music and playlists
+      - ./music:/app/music
+      - ./playlists:/app/playlists
+    networks:
+      - bot-network
+
+networks:
+  bot-network:
+    driver: bridge

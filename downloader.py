@@ -36,6 +36,58 @@ class MusicDownloader:
             print(f"İndirme hatası: {e}")
             raise
     
+    async def get_stream_url(self, url):
+        """URL'den stream bilgisi al (indirmeden)"""
+        try:
+            loop = asyncio.get_event_loop()
+            stream_info = await loop.run_in_executor(
+                None,
+                self._get_stream_sync,
+                url
+            )
+            return stream_info
+        except Exception as e:
+            print(f"Stream hatası: {e}")
+            raise
+    
+    def _get_stream_sync(self, url):
+        """Senkron stream URL alma fonksiyonu"""
+        try:
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                
+                # En iyi ses formatını bul
+                if 'url' in info:
+                    stream_url = info['url']
+                elif 'formats' in info:
+                    # En iyi ses formatını seç
+                    audio_formats = [f for f in info['formats'] if f.get('acodec') != 'none']
+                    if audio_formats:
+                        best_audio = max(audio_formats, key=lambda f: f.get('abr', 0) or 0)
+                        stream_url = best_audio['url']
+                    else:
+                        stream_url = info['formats'][-1]['url']
+                else:
+                    return None
+                
+                return {
+                    'url': stream_url,
+                    'title': info.get('title', 'Bilinmeyen'),
+                    'duration': info.get('duration', 0),
+                    'thumbnail': info.get('thumbnail', ''),
+                    'webpage_url': info.get('webpage_url', url)
+                }
+        except Exception as e:
+            print(f"Stream hatası: {e}")
+            raise
+    
     def _download_sync(self, url):
         """Senkron indirme fonksiyonu"""
         try:
