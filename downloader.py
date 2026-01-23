@@ -33,19 +33,60 @@ class MusicDownloader:
         # Cookie dosyası kontrolü (sadece dosyadan okur)
         cookie_file = Config.YOUTUBE_COOKIES_FILE
         
-        if cookie_file and os.path.exists(cookie_file):
-            # Dosya boyutunu kontrol et (boş olmamalı)
-            file_size = os.path.getsize(cookie_file)
-            if file_size > 0:
-                self.ydl_opts['cookiefile'] = cookie_file
-                print(f"✅ Cookie dosyası yüklendi: {cookie_file} (Boyut: {file_size} bytes)")
+        print(f"🔍 Cookie desteği kontrol ediliyor...")
+        print(f"🔍 Config.YOUTUBE_COOKIES_FILE: {cookie_file}")
+        print(f"🔍 Config.COOKIES_DIR: {Config.COOKIES_DIR}")
+        
+        if cookie_file:
+            print(f"🔍 Cookie dosyası yolu: {cookie_file}")
+            print(f"🔍 Dosya var mı? {os.path.exists(cookie_file)}")
+            
+            if os.path.exists(cookie_file):
+                # Dosya boyutunu kontrol et (boş olmamalı)
+                file_size = os.path.getsize(cookie_file)
+                print(f"🔍 Dosya boyutu: {file_size} bytes")
+                
+                if file_size > 0:
+                    self.ydl_opts['cookiefile'] = cookie_file
+                    print(f"✅ Cookie dosyası yüklendi: {cookie_file} (Boyut: {file_size} bytes)")
+                    # İlk birkaç satırı göster (debug için)
+                    try:
+                        with open(cookie_file, 'r', encoding='utf-8') as f:
+                            first_line = f.readline().strip()
+                            print(f"🔍 Cookie dosyası ilk satır: {first_line[:50]}...")
+                    except Exception as e:
+                        print(f"⚠️  Cookie dosyası okunamadı: {e}")
+                else:
+                    print(f"⚠️  Cookie dosyası boş: {cookie_file}")
             else:
-                print(f"⚠️  Cookie dosyası boş: {cookie_file}")
-        else:
-            if cookie_file:
                 print(f"⚠️  Cookie dosyası bulunamadı: {cookie_file}")
-            else:
-                print("⚠️  Cookie dosyası belirtilmemiş.")
+                # Alternatif yolları kontrol et
+                alt_paths = [
+                    os.path.join(Config.COOKIES_DIR, 'cookies.txt'),
+                    '/app/cookies/cookies.txt',
+                    'cookies/cookies.txt'
+                ]
+                print(f"🔍 Alternatif yollar kontrol ediliyor...")
+                for alt_path in alt_paths:
+                    if os.path.exists(alt_path):
+                        print(f"✅ Alternatif yol bulundu: {alt_path}")
+                        file_size = os.path.getsize(alt_path)
+                        if file_size > 0:
+                            self.ydl_opts['cookiefile'] = alt_path
+                            print(f"✅ Cookie dosyası alternatif yoldan yüklendi: {alt_path}")
+                            break
+        else:
+            print("⚠️  Cookie dosyası belirtilmemiş.")
+            # Varsayılan yolu kontrol et
+            default_path = os.path.join(Config.COOKIES_DIR, 'cookies.txt')
+            print(f"🔍 Varsayılan yol kontrol ediliyor: {default_path}")
+            if os.path.exists(default_path):
+                file_size = os.path.getsize(default_path)
+                if file_size > 0:
+                    self.ydl_opts['cookiefile'] = default_path
+                    print(f"✅ Cookie dosyası varsayılan yoldan yüklendi: {default_path}")
+        
+        if 'cookiefile' not in self.ydl_opts:
             print(f"💡 Cookie dosyası oluşturmak için: yt-dlp --cookies-from-browser chrome --cookies {Config.COOKIES_DIR}/cookies.txt")
     
     async def download_and_save(self, url):

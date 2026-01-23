@@ -32,9 +32,16 @@ class Config:
     if YOUTUBE_COOKIES_FILE is None:
         # Varsayılan olarak cookies/cookies.txt kullan
         default_cookie_path = os.path.join(COOKIES_DIR, 'cookies.txt')
+        print(f"🔍 Cookie dosyası aranıyor: {default_cookie_path}")
+        print(f"🔍 BASE_DIR: {BASE_DIR}")
+        print(f"🔍 COOKIES_DIR: {COOKIES_DIR}")
         if os.path.exists(default_cookie_path):
             YOUTUBE_COOKIES_FILE = default_cookie_path
+            print(f"✅ Cookie dosyası bulundu: {YOUTUBE_COOKIES_FILE}")
+        else:
+            print(f"⚠️  Cookie dosyası bulunamadı: {default_cookie_path}")
     elif not os.path.isabs(YOUTUBE_COOKIES_FILE):
         # Relative path ise BASE_DIR'e göre çöz
         YOUTUBE_COOKIES_FILE = os.path.join(BASE_DIR, YOUTUBE_COOKIES_FILE)
+        print(f"🔍 Cookie dosyası yolu çözümlendi: {YOUTUBE_COOKIES_FILE}")
 
