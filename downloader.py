@@ -2,6 +2,8 @@ import yt_dlp
 import os
 import sys
 import asyncio
+import subprocess
+import json
 from config import Config
 
 class MusicDownloader:
@@ -111,45 +113,81 @@ class MusicDownloader:
             raise
     
     def _get_stream_sync(self, url):
-        """Senkron stream URL alma fonksiyonu"""
+        """Senkron stream URL alma fonksiyonu - subprocess ile"""
         try:
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'quiet': False,
-                'no_warnings': False,
-                'extract_flat': False,
-            }
-            # Cookie desteği ekle
-            if self.cookie_file:
-                ydl_opts['cookiefile'] = self.cookie_file
-                print(f"🔐 Stream için cookie kullanılıyor: {self.cookie_file}", flush=True)
+            print(f"🔐 Stream alınıyor: {url}", flush=True)
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                
-                # En iyi ses formatını bul
-                if 'url' in info:
-                    stream_url = info['url']
-                elif 'formats' in info:
-                    # En iyi ses formatını seç
-                    audio_formats = [f for f in info['formats'] if f.get('acodec') != 'none']
-                    if audio_formats:
-                        best_audio = max(audio_formats, key=lambda f: f.get('abr', 0) or 0)
-                        stream_url = best_audio['url']
-                    else:
-                        stream_url = info['formats'][-1]['url']
-                else:
-                    return None
-                
-                return {
-                    'url': stream_url,
-                    'title': info.get('title', 'Bilinmeyen'),
-                    'duration': info.get('duration', 0),
-                    'thumbnail': info.get('thumbnail', ''),
-                    'webpage_url': info.get('webpage_url', url)
-                }
+            # yt-dlp komutunu oluştur
+            cmd = [
+                'yt-dlp',
+                '--js-runtimes', 'node',
+                '-f', 'bestaudio/best',
+                '--dump-json',
+                '--no-download',
+            ]
+            
+            # Cookie dosyası ekle
+            if self.cookie_file:
+                cmd.extend(['--cookies', self.cookie_file])
+                print(f"🔐 Cookie kullanılıyor: {self.cookie_file}", flush=True)
+            
+            cmd.append(url)
+            
+            print(f"🔐 Komut: {' '.join(cmd)}", flush=True)
+            
+            # Komutu çalıştır
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            if result.returncode != 0:
+                print(f"⚠️ yt-dlp stderr: {result.stderr}", flush=True)
+                raise Exception(f"yt-dlp hatası: {result.stderr}")
+            
+            # JSON'ı parse et
+            info = json.loads(result.stdout)
+            
+            # En iyi ses formatını bul
+            stream_url = None
+            if 'url' in info:
+                stream_url = info['url']
+            elif 'formats' in info:
+                # En iyi ses formatını seç
+                audio_formats = [f for f in info['formats'] if f.get('acodec') != 'none' and f.get('url')]
+                if audio_formats:
+                    best_audio = max(audio_formats, key=lambda f: f.get('abr', 0) or 0)
+                    stream_url = best_audio['url']
+                elif info['formats']:
+                    # Herhangi bir format al
+                    for fmt in reversed(info['formats']):
+                        if fmt.get('url'):
+                            stream_url = fmt['url']
+                            break
+            
+            if not stream_url:
+                print("⚠️ Stream URL bulunamadı!", flush=True)
+                return None
+            
+            print(f"✅ Stream URL alındı: {info.get('title', 'Bilinmeyen')}", flush=True)
+            
+            return {
+                'url': stream_url,
+                'title': info.get('title', 'Bilinmeyen'),
+                'duration': info.get('duration', 0),
+                'thumbnail': info.get('thumbnail', ''),
+                'webpage_url': info.get('webpage_url', url)
+            }
+        except subprocess.TimeoutExpired:
+            print("⚠️ yt-dlp timeout!", flush=True)
+            raise Exception("yt-dlp zaman aşımına uğradı")
+        except json.JSONDecodeError as e:
+            print(f"⚠️ JSON parse hatası: {e}", flush=True)
+            raise
         except Exception as e:
-            print(f"Stream hatası: {e}")
+            print(f"Stream hatası: {e}", flush=True)
             raise
     
     def _download_sync(self, url):
