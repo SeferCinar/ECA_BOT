@@ -34,10 +34,18 @@ class MusicDownloader:
         cookie_file = Config.YOUTUBE_COOKIES_FILE
         
         if cookie_file and os.path.exists(cookie_file):
-            self.ydl_opts['cookiefile'] = cookie_file
-            print(f"✅ Cookie dosyası yüklendi: {cookie_file}")
+            # Dosya boyutunu kontrol et (boş olmamalı)
+            file_size = os.path.getsize(cookie_file)
+            if file_size > 0:
+                self.ydl_opts['cookiefile'] = cookie_file
+                print(f"✅ Cookie dosyası yüklendi: {cookie_file} (Boyut: {file_size} bytes)")
+            else:
+                print(f"⚠️  Cookie dosyası boş: {cookie_file}")
         else:
-            print("⚠️  Cookie dosyası belirtilmemiş veya bulunamadı. YouTube bot algılaması sorunları yaşanabilir.")
+            if cookie_file:
+                print(f"⚠️  Cookie dosyası bulunamadı: {cookie_file}")
+            else:
+                print("⚠️  Cookie dosyası belirtilmemiş.")
             print(f"💡 Cookie dosyası oluşturmak için: yt-dlp --cookies-from-browser chrome --cookies {Config.COOKIES_DIR}/cookies.txt")
     
     async def download_and_save(self, url):
@@ -79,8 +87,10 @@ class MusicDownloader:
                 'extract_flat': False,
             }
             # Cookie desteği ekle
-            if Config.YOUTUBE_COOKIES_FILE and os.path.exists(Config.YOUTUBE_COOKIES_FILE):
-                ydl_opts['cookiefile'] = Config.YOUTUBE_COOKIES_FILE
+            cookie_file = Config.YOUTUBE_COOKIES_FILE
+            if cookie_file and os.path.exists(cookie_file) and os.path.getsize(cookie_file) > 0:
+                ydl_opts['cookiefile'] = cookie_file
+                print(f"🔐 Stream için cookie kullanılıyor: {cookie_file}")
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -178,8 +188,10 @@ class MusicDownloader:
                 'max_downloads': max_results
             }
             # Cookie desteği ekle
-            if Config.YOUTUBE_COOKIES_FILE and os.path.exists(Config.YOUTUBE_COOKIES_FILE):
-                ydl_opts['cookiefile'] = Config.YOUTUBE_COOKIES_FILE
+            cookie_file = Config.YOUTUBE_COOKIES_FILE
+            if cookie_file and os.path.exists(cookie_file) and os.path.getsize(cookie_file) > 0:
+                ydl_opts['cookiefile'] = cookie_file
+                print(f"🔐 Arama için cookie kullanılıyor: {cookie_file}")
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 # Arama yap
