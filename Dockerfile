@@ -1,11 +1,14 @@
 # Python 3.11 slim base image
 FROM python:3.11-slim
 
-# FFmpeg and other dependencies
+# FFmpeg, Node.js (for yt-dlp JavaScript runtime) and other dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libopus0 \
     libopus-dev \
+    curl \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory
