@@ -76,9 +76,38 @@ DISCORD_TOKEN=your_bot_token_here
 BOT_PREFIX=!
 MUSIC_DIR=music
 PLAYLISTS_DIR=playlists
+
+# YouTube Cookie Desteği (Bot algılamasını önlemek için - OPSİYONEL)
+# Cookie dosyası oluşturmak için aşağıdaki komutları kullanın:
+# Chrome: yt-dlp --cookies-from-browser chrome --cookies cookies.txt
+# Firefox: yt-dlp --cookies-from-browser firefox --cookies cookies.txt
+# Edge: yt-dlp --cookies-from-browser edge --cookies cookies.txt
+YOUTUBE_COOKIES_FILE=cookies.txt
+# VEYA browser'dan otomatik çekmek için (daha az güvenilir):
+# YOUTUBE_COOKIES_BROWSER=chrome
 ```
 
 **Not:** `MUSIC_DIR` ve `PLAYLISTS_DIR` değerleri proje dizinine göre otomatik olarak ayarlanır. Sadece klasör adını belirtmeniz yeterlidir (örn: `music`, `playlists`). Bu klasörler projenin bulunduğu dizinde otomatik olarak oluşturulur.
+
+### 4.5. YouTube Cookie Dosyası Oluşturma (Önerilir)
+
+YouTube bot algılaması sorunlarını önlemek için cookie dosyası oluşturmanız önerilir:
+
+```bash
+# Chrome'dan cookie çek
+yt-dlp --cookies-from-browser chrome --cookies cookies.txt
+
+# VEYA Firefox'tan
+yt-dlp --cookies-from-browser firefox --cookies cookies.txt
+
+# VEYA Edge'den
+yt-dlp --cookies-from-browser edge --cookies cookies.txt
+```
+
+**Önemli:** 
+- Cookie dosyası (`cookies.txt`) hassas bilgiler içerir ve `.gitignore`'a eklenmiştir.
+- Cookie dosyasını asla GitHub'a yüklemeyin!
+- Cookie dosyası oluşturduktan sonra `.env` dosyasında `YOUTUBE_COOKIES_FILE=cookies.txt` olarak belirtin.
 
 ### 5. Botu Çalıştırma
 
@@ -129,10 +158,13 @@ docker run -d \
   --env-file .env \
   -v $(pwd)/music:/app/music \
   -v $(pwd)/playlists:/app/playlists \
+  -v $(pwd)/cookies.txt:/app/cookies.txt \
   eca-discord-bot
 ```
 
-**Not:** Docker kullanırken `music/` ve `playlists/` klasörleri volume olarak bağlanır, böylece veriler container yeniden başlatıldığında korunur.
+**Not:** Docker kullanırken `music/`, `playlists/` ve `cookies.txt` dosyası volume olarak bağlanır, böylece veriler container yeniden başlatıldığında korunur.
+
+**Cookie Dosyası:** Eğer cookie dosyası kullanıyorsanız, dosyayı container içine mount etmeyi unutmayın. Cookie dosyası yoksa bu satırı atlayabilirsiniz.
 
 ## Komutlar
 

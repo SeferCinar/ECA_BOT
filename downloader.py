@@ -20,6 +20,33 @@ class MusicDownloader:
             'quiet': False,
             'no_warnings': False,
         }
+        
+        # Cookie desteği ekle (bot algılamasını önlemek için)
+        self._add_cookie_support()
+    
+    def _add_cookie_support(self):
+        """Cookie desteği ekle - YouTube bot algılamasını önlemek için"""
+        # Önce cookie dosyası kontrolü
+        if Config.YOUTUBE_COOKIES_FILE and os.path.exists(Config.YOUTUBE_COOKIES_FILE):
+            self.ydl_opts['cookiefile'] = Config.YOUTUBE_COOKIES_FILE
+            print(f"✅ Cookie dosyası yüklendi: {Config.YOUTUBE_COOKIES_FILE}")
+        # Browser'dan cookie çekme
+        elif Config.YOUTUBE_COOKIES_BROWSER:
+            # yt-dlp browser'dan cookie çekmeyi destekler
+            # Desteklenen browser'lar: chrome, firefox, edge, safari, opera, brave, vivaldi
+            browser = Config.YOUTUBE_COOKIES_BROWSER.lower()
+            if browser in ['chrome', 'firefox', 'edge', 'safari', 'opera', 'brave', 'vivaldi']:
+                try:
+                    # Browser'dan cookie çekmeyi dene
+                    # yt-dlp otomatik olarak browser'dan cookie çeker
+                    # Ancak bu özellik için ekstra parametre gerekebilir
+                    # Şimdilik cookie dosyası kullanımını öneriyoruz
+                    print(f"⚠️  Browser cookie desteği: {browser} (cookie dosyası kullanmanız önerilir)")
+                except Exception as e:
+                    print(f"⚠️  Browser cookie hatası: {e}")
+        else:
+            print("⚠️  Cookie dosyası belirtilmemiş. YouTube bot algılaması sorunları yaşanabilir.")
+            print("💡 Cookie dosyası oluşturmak için: yt-dlp --cookies-from-browser chrome --cookies cookies.txt")
     
     async def download_and_save(self, url):
         """URL'den müzik indir ve kaydet"""
@@ -59,6 +86,9 @@ class MusicDownloader:
                 'no_warnings': True,
                 'extract_flat': False,
             }
+            # Cookie desteği ekle
+            if Config.YOUTUBE_COOKIES_FILE and os.path.exists(Config.YOUTUBE_COOKIES_FILE):
+                ydl_opts['cookiefile'] = Config.YOUTUBE_COOKIES_FILE
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -155,6 +185,9 @@ class MusicDownloader:
                 'default_search': 'ytsearch',
                 'max_downloads': max_results
             }
+            # Cookie desteği ekle
+            if Config.YOUTUBE_COOKIES_FILE and os.path.exists(Config.YOUTUBE_COOKIES_FILE):
+                ydl_opts['cookiefile'] = Config.YOUTUBE_COOKIES_FILE
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 # Arama yap

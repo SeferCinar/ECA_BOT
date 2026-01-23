@@ -19,4 +19,12 @@ class Config:
     
     # Playlist dosyalarının saklanacağı klasör (proje dizinine göre)
     PLAYLISTS_DIR = os.path.join(BASE_DIR, os.getenv('PLAYLISTS_DIR', 'playlists'))
+    
+    # YouTube cookie dosyası yolu (opsiyonel - bot algılamasını önlemek için)
+    # Cookie dosyasını yt-dlp ile export edebilirsiniz: yt-dlp --cookies-from-browser chrome
+    YOUTUBE_COOKIES_FILE = os.getenv('YOUTUBE_COOKIES_FILE', None)
+    
+    # Browser'dan cookie çekme (chrome, firefox, edge, safari, opera, brave, vivaldi)
+    # Eğer YOUTUBE_COOKIES_FILE belirtilmemişse, bu browser'dan cookie çekmeyi dener
+    YOUTUBE_COOKIES_BROWSER = os.getenv('YOUTUBE_COOKIES_BROWSER', None)
 

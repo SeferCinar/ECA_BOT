@@ -26,6 +26,10 @@ wheels/
 # Environment variables
 .env
 
+# YouTube cookies (contains sensitive authentication data)
+cookies.txt
+*.cookies
+
 # Müzik dosyaları ve playlist'ler
 music/
 playlists/
