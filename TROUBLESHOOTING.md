@@ -1,0 +1,193 @@
+# YouTube Bot Algılama Sorunları ve Çözümleri
+
+Bu belge, Discord müzik botunun YouTube'dan müzik çekerken karşılaşabileceği sorunları ve çözümlerini içerir.
+
+## 🚨 Yaygın Hata Mesajları
+
+### 1. "Sign in to confirm you're not a bot"
+
+```
+ERROR: [youtube] XXXXX: Sign in to confirm you're not a bot. Use --cookies-from-browser or --cookies for the authentication.
+```
+
+**Nedenleri:**
+- Cookie dosyası eksik veya geçersiz
+- Cookie'lerin süresi dolmuş
+- YouTube hesabı bot olarak işaretlenmiş
+- Sunucu IP'si YouTube tarafından şüpheli görülüyor
+- Bazı videolar ekstra koruma altında
+
+**Çözümler:**
+1. Cookie dosyasını yeniden oluşturun (aşağıya bakın)
+2. Farklı bir YouTube hesabı deneyin
+3. Farklı bir video deneyin (bazı videolar özel korunuyor)
+
+---
+
+### 2. "No supported JavaScript runtime could be found"
+
+```
+WARNING: [youtube] No supported JavaScript runtime could be found. Only deno is enabled by default
+```
+
+**Nedeni:**
+- yt-dlp artık JavaScript runtime gerektiriyor (2024+ sürümleri)
+- Node.js veya Deno kurulu değil
+
+**Çözüm:**
+- Dockerfile'a Node.js eklendi
+- `--js-runtimes node` parametresi kullanılıyor
+
+---
+
+### 3. "android client https formats require a GVS PO Token"
+
+```
+WARNING: [youtube] XXXXX: android client https formats require a GVS PO Token which was not provided
+```
+
+**Nedeni:**
+- YouTube, Android client için PO Token istiyor
+- Bu yeni bir YouTube güvenlik önlemi
+
+**Çözüm:**
+- Bot otomatik olarak farklı formatları deniyor
+- Genellikle başka bir format çalışır
+
+---
+
+## 🍪 Cookie Dosyası Oluşturma
+
+### Adım 1: Yerel Bilgisayarında
+
+```bash
+# Chrome'dan cookie çek
+yt-dlp --cookies-from-browser chrome --cookies cookies.txt
+
+# Firefox'tan
+yt-dlp --cookies-from-browser firefox --cookies cookies.txt
+
+# Edge'den
+yt-dlp --cookies-from-browser edge --cookies cookies.txt
+```
+
+### Adım 2: Cookie Dosyasını Kontrol Et
+
+İlk satır şu şekilde olmalı:
+```
+# Netscape HTTP Cookie File
+```
+
+### Adım 3: Sunucuya Yükle
+
+Cookie dosyasını `/app/cookies/cookies.txt` yoluna yükleyin.
+
+### Adım 4: Test Et
+
+```bash
+# Container içinde test
+yt-dlp --cookies /app/cookies/cookies.txt --js-runtimes node -f bestaudio -g "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+```
+
+---
+
+## 🔧 Coolify Terminal Komutları
+
+### Cookie Dosyasını Kontrol Et
+```bash
+ls -la /app/cookies/
+cat /app/cookies/cookies.txt | head -5
+```
+
+### Node.js Kontrolü
+```bash
+node --version
+```
+
+### yt-dlp Testi
+```bash
+# Basit test
+yt-dlp --cookies /app/cookies/cookies.txt --js-runtimes node -f bestaudio -g "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+# JSON çıktı ile test
+yt-dlp --cookies /app/cookies/cookies.txt --js-runtimes node --dump-json "https://www.youtube.com/watch?v=dQw4w9WgXcQ" | head -20
+```
+
+### Python API Testi
+```bash
+python3 -c "
+import yt_dlp
+ydl_opts = {
+    'format': 'bestaudio/best',
+    'quiet': True,
+    'cookiefile': '/app/cookies/cookies.txt',
+}
+with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    info = ydl.extract_info('https://www.youtube.com/watch?v=dQw4w9WgXcQ', download=False)
+    print('Title:', info.get('title'))
+    print('URL:', info.get('url', 'No direct URL'))
+"
+```
+
+---
+
+## ⚠️ Bilinen Kısıtlamalar
+
+### Bazı Videolar Çalışmayabilir
+
+YouTube, bazı videoları ekstra koruma altına alır:
+- Telif hakkı korumalı içerikler
+- Yaş sınırlı videolar
+- Bölge kısıtlamalı videolar
+- Yeni yüklenen popüler videolar
+
+**Çözüm:** Farklı bir video deneyin.
+
+### Cookie'ler Zaman İçinde Geçersiz Olabilir
+
+YouTube cookie'leri genellikle 1-4 hafta içinde expire olur.
+
+**Çözüm:** Cookie dosyasını düzenli olarak yenileyin.
+
+### Sunucu IP'si Engellenmiş Olabilir
+
+VPS/Cloud sunucu IP'leri YouTube tarafından şüpheli görülebilir.
+
+**Çözüm:** Farklı bir sunucu veya residential proxy deneyin.
+
+---
+
+## 📋 Teknik Detaylar
+
+### Kullanılan Teknolojiler
+- **yt-dlp**: YouTube video/audio indirme
+- **Node.js**: JavaScript runtime (yt-dlp için gerekli)
+- **FFmpeg**: Ses dönüştürme
+- **discord.py**: Discord bot framework
+
+### Dockerfile Gereksinimleri
+```dockerfile
+# Node.js kurulumu (yt-dlp JS runtime için)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs
+```
+
+### yt-dlp Parametreleri
+```
+--js-runtimes node     # JavaScript runtime olarak Node.js kullan
+--cookies FILE         # Cookie dosyası
+-f bestaudio/best      # En iyi ses kalitesi
+--dump-json            # JSON çıktı (API için)
+```
+
+---
+
+## 🔗 Faydalı Linkler
+
+- [yt-dlp Wiki - Cookies](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp)
+- [yt-dlp Wiki - EJS (JavaScript Runtime)](https://github.com/yt-dlp/yt-dlp/wiki/EJS)
+- [yt-dlp GitHub Issues](https://github.com/yt-dlp/yt-dlp/issues)
+
+---
+
+*Son güncelleme: Ocak 2026*
