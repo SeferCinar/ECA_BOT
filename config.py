@@ -33,7 +33,6 @@ class Config:
     # OAuth2 ile YouTube hesabı girişi (varsayılan açık - private bot için kabul edilebilir)
     YOUTUBE_OAUTH2_ENABLED = os.getenv('YOUTUBE_OAUTH2_ENABLED', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
 
-
     @classmethod
     def get_cookie_file(cls):
         """Cookie dosyası yolunu dinamik olarak belirle"""
