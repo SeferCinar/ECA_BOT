@@ -91,6 +91,42 @@ yt-dlp --cookies /app/cookies/cookies.txt --js-runtimes node -f bestaudio -g "ht
 
 ---
 
+## 🤖 PO Token Provider ve OAuth2 (Kalıcı Sunucu Tarafı Çözüm)
+
+Cookie dosyası haftalar içinde expire olduğu için, kalıcı bir çözüm olarak iki katman eklendi. İkisi de mevcut cookie yöntemini bozmuyor, üstüne ekleniyor.
+
+### PO Token Provider
+
+`docker-compose.yml` içinde `pot-provider` adında ayrı bir servis çalışır (`brainicism/bgutil-ytdlp-pot-provider` image'ı). Bu servis, YouTube'un bot kontrolünü hesaba giriş yapmadan aşmak için gereken PO Token'ı üretir.
+
+**Doğrulama:**
+```bash
+docker compose ps pot-provider
+docker compose logs pot-provider
+```
+
+`pot-provider` servisi ayakta değilse bot loglarında `⚠️  PO Token provider yapılandırılmadı.` uyarısı görülür ve istekler PO Token olmadan devam eder (eski davranış, bot çökmez).
+
+`POT_PROVIDER_BASE_URL` env değişkeni ile adres override edilebilir (varsayılan: `http://pot-provider:4416`, docker-compose'daki servis adıyla eşleşir).
+
+### OAuth2 ile YouTube Hesabı Girişi
+
+`YOUTUBE_OAUTH2_ENABLED` (varsayılan: `true`) açıkken, bot cookie yerine gerçek bir YouTube hesabına OAuth2 ile giriş yapar. Bu, cookie'lerin haftalık expire olma sorununu ortadan kaldırır.
+
+**Tek seferlik kurulum (herhangi bir Docker host'ta, platformdan bağımsız):**
+
+```bash
+docker compose exec discord-bot yt-dlp --username oauth2 --password '' -f bestaudio -g "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+```
+
+Bu komut `https://www.google.com/device` adresini ve bir kod gösterir. Herhangi bir cihazdan/tarayıcıdan bu adrese gidip kodu girerek hesabı yetkilendirin. Token `./ytdlp-cache` klasöründe (docker-compose'da volume olarak bağlı) saklanır ve otomatik yenilenir — `ytdlp-cache` klasörü silinmediği sürece bu adımı tekrar yapmanız gerekmez, redeploy sonrası da geçerliliğini korur.
+
+**Not:** Coolify kullanıyorsanız yukarıdaki komutu Coolify'ın web terminalinden de çalıştırabilirsiniz — bu Coolify'a özgü bir adım değildir, sadece bir shell'e erişim gerektirir ve `docker` kurulu her yerde aynı şekilde çalışır.
+
+Cookie yöntemine geri dönmek isterseniz `.env` dosyasına `YOUTUBE_OAUTH2_ENABLED=false` ekleyin; bot otomatik olarak mevcut `cookies/cookies.txt` dosyasını kullanmaya devam eder.
+
+---
+
 ## 🔧 Coolify Terminal Komutları
 
 ### Cookie Dosyasını Kontrol Et
