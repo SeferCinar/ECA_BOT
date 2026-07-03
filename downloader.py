@@ -37,8 +37,8 @@ class MusicDownloader:
             'retries': 3,
         }
         
-        # Cookie desteği ekle (bot algılamasını önlemek için)
-        self._add_cookie_support()
+        # Kimlik doğrulama ve PO token ayarlarını ekle
+        self._configure_auth()
 
     def _check_node_runtime(self):
         """Node.js var mı kontrol et (Coolify/Docker ortamında teşhis için)"""
@@ -92,13 +92,38 @@ class MusicDownloader:
         print("=" * 50, flush=True)
         return None
     
-    def _add_cookie_support(self):
-        """Cookie desteği ekle - YouTube bot algılamasını önlemek için"""
+    def _auth_options(self):
+        """yt-dlp için kimlik doğrulama ayarlarını döndür (oauth2 öncelikli, yoksa cookiefile)"""
+        if Config.YOUTUBE_OAUTH2_ENABLED:
+            return {'username': 'oauth2', 'password': ''}
         if self.cookie_file:
-            self.ydl_opts['cookiefile'] = self.cookie_file
-            print(f"✅ Cookie dosyası yüklendi: {self.cookie_file}", flush=True)
+            return {'cookiefile': self.cookie_file}
+        return {}
+
+    def _pot_extractor_args(self):
+        """yt-dlp için PO Token provider extractor_args ayarını döndür"""
+        if not Config.POT_PROVIDER_BASE_URL:
+            return {}
+        return {'youtubepot-bgutilhttp': {'base_url': [Config.POT_PROVIDER_BASE_URL]}}
+
+    def _configure_auth(self):
+        """Kimlik doğrulama ve PO token ayarlarını ydl_opts'a uygula"""
+        auth = self._auth_options()
+        self.ydl_opts.update(auth)
+
+        pot_args = self._pot_extractor_args()
+        if pot_args:
+            self.ydl_opts['extractor_args'] = pot_args
+            print(f"✅ PO Token provider aktif: {Config.POT_PROVIDER_BASE_URL}", flush=True)
         else:
-            print("⚠️  Cookie dosyası yüklenemedi. YouTube bot algılaması sorunları yaşanabilir.", flush=True)
+            print("⚠️  PO Token provider yapılandırılmadı.", flush=True)
+
+        if 'username' in auth:
+            print("✅ YouTube OAuth2 kimlik doğrulama aktif (username=oauth2)", flush=True)
+        elif 'cookiefile' in auth:
+            print(f"✅ Cookie dosyası yüklendi: {auth['cookiefile']}", flush=True)
+        else:
+            print("⚠️  Kimlik doğrulama yapılandırılmadı. YouTube bot algılaması sorunları yaşanabilir.", flush=True)
             print(f"💡 Cookie dosyası yolu: {Config.COOKIES_DIR}/cookies.txt", flush=True)
     
     async def download_and_save(self, url):
@@ -144,11 +169,22 @@ class MusicDownloader:
                 '--no-download',
             ]
             
-            # Cookie dosyası ekle
-            if self.cookie_file:
-                cmd.extend(['--cookies', self.cookie_file])
-                print(f"🔐 Cookie kullanılıyor: {self.cookie_file}", flush=True)
-            
+            # Kimlik doğrulama ekle (oauth2 veya cookiefile)
+            auth = self._auth_options()
+            if 'username' in auth:
+                cmd.extend(['--username', auth['username'], '--password', auth['password']])
+                print("🔐 OAuth2 kimlik doğrulama kullanılıyor", flush=True)
+            elif 'cookiefile' in auth:
+                cmd.extend(['--cookies', auth['cookiefile']])
+                print(f"🔐 Cookie kullanılıyor: {auth['cookiefile']}", flush=True)
+
+            # PO Token provider ekle
+            pot_args = self._pot_extractor_args()
+            if pot_args:
+                base_url = pot_args['youtubepot-bgutilhttp']['base_url'][0]
+                cmd.extend(['--extractor-args', f'youtubepot-bgutilhttp:base_url={base_url}'])
+                print(f"🔐 PO Token provider kullanılıyor: {base_url}", flush=True)
+
             cmd.append(url)
             
             print(f"🔐 Komut: {' '.join(cmd)}", flush=True)
@@ -275,11 +311,12 @@ class MusicDownloader:
                 'default_search': 'ytsearch',
                 'max_downloads': max_results,
             }
-            # Cookie desteği ekle
-            if self.cookie_file:
-                ydl_opts['cookiefile'] = self.cookie_file
-                print(f"🔐 Arama için cookie kullanılıyor: {self.cookie_file}", flush=True)
-            
+            # Kimlik doğrulama ve PO token ayarlarını ekle
+            ydl_opts.update(self._auth_options())
+            pot_args = self._pot_extractor_args()
+            if pot_args:
+                ydl_opts['extractor_args'] = pot_args
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 # Arama yap
                 search_query = f"ytsearch{max_results}:{query}"
