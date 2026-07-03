@@ -7,6 +7,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    depends_on:
+      - pot-provider
     volumes:
       # Persist music and playlists
       - ./music:/app/music
@@ -16,6 +18,15 @@ services:
       # YouTube cookies (optional - only if you have cookies.txt file)
       # Uncomment the line below if you have a cookies.txt file
       # - ./cookies.txt:/app/cookies.txt
+      # yt-dlp OAuth2 token cache (persists YouTube login across restarts)
+      - ./ytdlp-cache:/root/.cache/yt-dlp
+    networks:
+      - bot-network
+
+  pot-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider
+    container_name: eca-pot-provider
+    restart: unless-stopped
     networks:
       - bot-network
 
