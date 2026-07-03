@@ -26,7 +26,14 @@ class Config:
     
     # YouTube cookie dosyası yolu - .env'den veya None
     YOUTUBE_COOKIES_FILE = os.getenv('YOUTUBE_COOKIES_FILE', None)
-    
+
+    # PO Token provider adresi (bot algılamasını hesaba gerek kalmadan aşmak için)
+    POT_PROVIDER_BASE_URL = os.getenv('POT_PROVIDER_BASE_URL', 'http://pot-provider:4416')
+
+    # OAuth2 ile YouTube hesabı girişi (varsayılan açık - private bot için kabul edilebilir)
+    YOUTUBE_OAUTH2_ENABLED = os.getenv('YOUTUBE_OAUTH2_ENABLED', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
     @classmethod
     def get_cookie_file(cls):
         """Cookie dosyası yolunu dinamik olarak belirle"""
