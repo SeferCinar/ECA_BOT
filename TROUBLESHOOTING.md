@@ -156,6 +156,19 @@ docker compose logs pot-provider
 
 `YOUTUBE_OAUTH2_ENABLED` (varsayılan: `true`) açıkken, bot cookie yerine gerçek bir YouTube hesabına OAuth2 ile giriş yapar. Bu, cookie'lerin haftalık expire olma sorununu ortadan kaldırır.
 
+⚠️ **Google Cloud OAuth2 Client ID oluşturma (HTTP 400 hatası alıyorsanız zorunlu):**
+
+Plugin'in varsayılan client ID'si çok kullanıldığı için rate-limit'e takılabilir ve `HTTP Error 400: Bad Request` hatası verebilir. Bu durumda kendi client ID'nizi oluşturmanız gerekir:
+
+1. https://console.cloud.google.com/apis/credentials adresine gidin
+2. "Create Credentials" > "OAuth client ID" seçin
+3. Application type: "Desktop app" (veya "Web application")
+4. Oluşturduktan sonra Client ID ve Client Secret'ı `.env` dosyanıza ekleyin:
+   ```
+   YOUTUBE_OAUTH2_CLIENT_ID=123456789-xxxx.apps.googleusercontent.com
+   YOUTUBE_OAUTH2_CLIENT_SECRET=GOCSPX-xxxx
+   ```
+
 **Tek seferlik kurulum (herhangi bir Docker host'ta, platformdan bağımsız):**
 
 ```bash

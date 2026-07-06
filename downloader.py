@@ -95,7 +95,11 @@ class MusicDownloader:
     def _auth_options(self):
         """yt-dlp için kimlik doğrulama ayarlarını döndür (oauth2 öncelikli, yoksa cookiefile)"""
         if Config.YOUTUBE_OAUTH2_ENABLED:
-            return {'username': 'oauth2', 'password': ''}
+            opts = {'username': 'oauth2', 'password': ''}
+            if Config.YOUTUBE_OAUTH2_CLIENT_ID and Config.YOUTUBE_OAUTH2_CLIENT_SECRET:
+                opts['oauth2_client_id'] = Config.YOUTUBE_OAUTH2_CLIENT_ID
+                opts['oauth2_client_secret'] = Config.YOUTUBE_OAUTH2_CLIENT_SECRET
+            return opts
         if self.cookie_file:
             return {'cookiefile': self.cookie_file}
         return {}
@@ -171,8 +175,11 @@ class MusicDownloader:
             
             # Kimlik doğrulama ekle (oauth2 veya cookiefile)
             auth = self._auth_options()
+            extractor_args = []
             if 'username' in auth:
                 cmd.extend(['--username', auth['username'], '--password', auth['password']])
+                if auth.get('oauth2_client_id') and auth.get('oauth2_client_secret'):
+                    extractor_args.append(f"youtube:oauth2_client_id={auth['oauth2_client_id']};oauth2_client_secret={auth['oauth2_client_secret']}")
                 print("🔐 OAuth2 kimlik doğrulama kullanılıyor", flush=True)
             elif 'cookiefile' in auth:
                 cmd.extend(['--cookies', auth['cookiefile']])
@@ -182,8 +189,11 @@ class MusicDownloader:
             pot_args = self._pot_extractor_args()
             if pot_args:
                 base_url = pot_args['youtubepot-bgutilhttp']['base_url'][0]
-                cmd.extend(['--extractor-args', f'youtubepot-bgutilhttp:base_url={base_url}'])
+                extractor_args.append(f'youtubepot-bgutilhttp:base_url={base_url}')
                 print(f"🔐 PO Token provider kullanılıyor: {base_url}", flush=True)
+
+            if extractor_args:
+                cmd.extend(['--extractor-args', ';'.join(extractor_args)])
 
             cmd.append(url)
             
