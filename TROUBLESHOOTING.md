@@ -114,9 +114,19 @@ docker compose exec discord-bot curl -s -o /dev/null -w "%{http_code}\n" http://
 # pot-provider'a hâlâ erişilebildiğini doğrular
 ```
 
+**Not:** Healthcheck artık WARP daemon'ının ayakta olup olmadığını değil, tünelin gerçekten bağlı olduğunu doğruluyor (`curl` ile Cloudflare'in trace endpoint'ini kontrol ediyor). Bu, `caomingjun/warp` image'ında `curl`'ün mevcut olduğunu varsayıyor. İlk deploy'da `warp` servisi uzun süre `healthy` olmuyorsa, `docker compose logs warp` ve `docker compose exec warp which curl` ile kontrol edin.
+
 ### Kabul edilen risk
 
-`discord-bot`'un kendi ağı olmadığı için, `warp` container'ı çökerse veya yeniden başlarsa `discord-bot` **tüm** bağlantısını kaybeder — sadece YouTube erişimini değil, Discord gateway/ses bağlantısını da. `restart: unless-stopped` ve healthcheck'e bağlı `depends_on` bunu büyük ölçüde toparlar (discord.py kendi reconnect mantığıyla `warp` geri geldiğinde otomatik bağlanır) ama garanti değildir. Bu, tüm trafiği tek bir noktadan geçirmenin bilinçli olarak kabul edilmiş bir bedelidir.
+`discord-bot`'un kendi ağı olmadığı için, `warp` container'ı çökerse veya yeniden başlarsa `discord-bot` **tüm** bağlantısını kaybeder — sadece YouTube erişimini değil, Discord gateway/ses bağlantısını da. `network_mode: "service:warp"`, `discord-bot`'u `warp`'ın o anki ağ namespace'ine bağlar; `warp` yeniden başladığında namespace'i yenilenir ama `discord-bot` eski (artık ölü) namespace'e bağlı kalır — discord.py'nin kendi reconnect mantığı bunu kurtaramaz, çünkü sorun uygulama katmanında değil, kernel network namespace'inin kendisinde.
+
+**Bu yüzden `warp` her ne sebeple yeniden başlarsa başlasın (elle `docker compose restart warp`, çökme sonrası `restart: unless-stopped`, ya da başka bir müdahale), `discord-bot`'un da yeniden başlatılması gerekir:**
+
+```bash
+docker compose restart warp discord-bot
+```
+
+`docker compose up -d --build` ile yapılan tam bir redeploy bu sorunu yaşamaz (Compose her iki servisi de doğru sırayla yeniden oluşturur) — risk yalnızca `warp`'ın tek başına yeniden başlaması durumunda geçerlidir. Bu, tüm trafiği tek bir noktadan geçirmenin bilinçli olarak kabul edilmiş bir bedelidir.
 
 ### Health check endpoint kullanıyorsanız
 

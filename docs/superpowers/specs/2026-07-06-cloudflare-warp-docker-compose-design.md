@@ -19,7 +19,7 @@ The bot runs on a cloud/VPS server whose IP is sometimes flagged by YouTube inde
 
 ## Chosen approach: `caomingjun/warp` sidecar via `network_mode: "service:warp"`
 
-`caomingjun/warp` is a community-maintained image built specifically for this "front another container's entire network stack" pattern: it registers an anonymous WARP device on startup (no account needed) and exposes a `warp-cli status` healthcheck.
+`caomingjun/warp` is a community-maintained image built specifically for this "front another container's entire network stack" pattern: it registers an anonymous WARP device on startup (no account needed) and exposes a healthcheck that verifies the tunnel is actually connected (a `warp-cli status` check alone would return success even while disconnected, since it only confirms the daemon process is responsive).
 
 **Rejected alternative:** scoping WARP to only yt-dlp calls via a SOCKS5 proxy (`--proxy` / `ydl_opts['proxy']` in `downloader.py`), leaving the Discord gateway connection on the VPS's normal network. This was rejected in favor of routing all traffic, per explicit decision during design — accepting the trade-off below.
 
@@ -34,7 +34,7 @@ The bot runs on a cloud/VPS server whose IP is sometimes flagged by YouTube inde
 
 ### Trade-off accepted
 
-Because `discord-bot` has no network of its own, if the `warp` container crashes or is mid-restart, `discord-bot` loses **all** connectivity — including the Discord gateway/voice connection, not just YouTube access. `restart: unless-stopped` on `warp` plus the healthcheck-gated `depends_on` reduce this risk (ordering on startup, auto-restart on crash) but do not eliminate it. This was discussed and explicitly accepted in favor of the simpler, uniform routing.
+Because `discord-bot` has no network of its own, if the `warp` container crashes or is restarted, `discord-bot` loses **all** connectivity — including the Discord gateway/voice connection, not just YouTube access. Worse: because `network_mode: "service:warp"` binds `discord-bot` to `warp`'s network namespace at container-start time, a `warp` restart tears down and recreates that namespace — `discord-bot` remains attached to the old, dead one. Nothing in discord.py's reconnect logic can repair this, since the failure is below the socket layer. Recovering requires restarting `discord-bot` alongside `warp` (`docker compose restart warp discord-bot`). The healthcheck-gated `depends_on` still protects the startup-ordering case (discord-bot won't start before warp is genuinely connected) — it just doesn't cover a later warp restart. This was discussed and explicitly accepted in favor of the simpler, uniform routing; the operational consequence is documented in `TROUBLESHOOTING.md` so it isn't a surprise during an incident.
 
 ### Operational consequence: health check port
 
@@ -43,7 +43,7 @@ If `ENABLE_HEALTH_SERVER=1` / `PORT` (see `config.py`, `bot.py`'s `_start_health
 ## Components changed
 
 - **`docker-compose.yml`**:
-  - New `warp` service: image `caomingjun/warp`, `restart: unless-stopped`, `cap_add: [NET_ADMIN]`, `devices: [/dev/net/tun:/dev/net/tun]`, `sysctls: [net.ipv6.conf.all.disable_ipv6=0, net.ipv4.conf.all.src_valid_mark=1]`, volume `./warp-data:/var/lib/cloudflare-warp`, attached to `bot-network`, healthcheck via `warp-cli status`.
+  - New `warp` service: image `caomingjun/warp`, `restart: unless-stopped`, `cap_add: [NET_ADMIN]`, `devices: [/dev/net/tun:/dev/net/tun]`, `sysctls: [net.ipv6.conf.all.disable_ipv6=0, net.ipv4.conf.all.src_valid_mark=1]`, volume `./warp-data:/var/lib/cloudflare-warp`, attached to `bot-network`, healthcheck via a `curl`-based Cloudflare trace check (confirms the tunnel is actually connected, not just that the daemon responds).
   - `discord-bot` service: replace `networks: [bot-network]` with `network_mode: "service:warp"`; update `depends_on` to `warp: condition: service_healthy` and `pot-provider: condition: service_started`.
   - `pot-provider` service: unchanged (stays on `bot-network`).
 - **`.gitignore`**: add `warp-data/` (holds the anonymous WARP device registration/key material — same treatment as `cookies/` and `ytdlp-cache/`).
@@ -51,8 +51,8 @@ If `ENABLE_HEALTH_SERVER=1` / `PORT` (see `config.py`, `bot.py`'s `_start_health
 
 ## Error handling
 
-- `warp` container fails to register/connect on first start → its healthcheck (`warp-cli status`) fails, `discord-bot`'s `depends_on: condition: service_healthy` keeps it from starting until `warp` recovers (or the operator investigates `docker compose logs warp`). This matches the existing project convention of failing loudly on infra-level problems rather than silently degrading, since — unlike the PO token provider — there's no meaningful "degraded" mode when the whole network is gone.
-- `warp` container crashes after `discord-bot` is already running → `discord-bot` loses network entirely (Discord gateway drops, voice drops, YouTube fetches fail) until `warp` (via `restart: unless-stopped`) comes back and `discord-bot` reconnects on its own (discord.py's own reconnect logic handles the gateway; no code change needed).
+- `warp` container fails to register/connect on first start → its healthcheck (Cloudflare trace check) fails, `discord-bot`'s `depends_on: condition: service_healthy` keeps it from starting until `warp` recovers (or the operator investigates `docker compose logs warp`). This matches the existing project convention of failing loudly on infra-level problems rather than silently degrading, since — unlike the PO token provider — there's no meaningful "degraded" mode when the whole network is gone.
+- `warp` container crashes or is restarted after `discord-bot` is already running → `discord-bot` loses network entirely (Discord gateway drops, voice drops, YouTube fetches fail) and does **not** recover on its own even after `warp` (via `restart: unless-stopped`) comes back — the shared network namespace was torn down and recreated, and `discord-bot` is still attached to the old one. The operator must restart `discord-bot` alongside `warp` (`docker compose restart warp discord-bot`) to restore connectivity; this is documented in `TROUBLESHOOTING.md`.
 - `pot-provider` unreachable from `discord-bot` (e.g. `warp` misconfigured/not on `bot-network`) → same existing graceful-degradation path as today (yt-dlp logs a warning, proceeds without a PO token) — this design does not change that behavior, it only must not *newly break* the network path that makes it reachable in the first place.
 
 ## Verification plan
@@ -62,5 +62,5 @@ No automated tests exist in this repo; verification is manual, post-deploy:
 1. `docker compose up -d --build` and confirm `docker compose ps` shows `warp` as `healthy`.
 2. `docker compose exec discord-bot curl -s https://www.cloudflare.com/cdn-cgi/trace | grep warp=` → expect `warp=on`.
 3. `docker compose exec discord-bot curl -s -o /dev/null -w "%{http_code}\n" http://pot-provider:4416` → confirm `pot-provider` is still reachable through the shared namespace.
-4. Restart the `warp` container (`docker compose restart warp`) while the bot is connected in a Discord voice channel, and confirm the bot's gateway/voice connection recovers on its own once `warp` is healthy again (validates the accepted trade-off is survivable, not catastrophic).
+4. Restart the `warp` container (`docker compose restart warp`) while the bot is connected in a Discord voice channel, and confirm the bot's voice/gateway connection drops and stays dropped until `discord-bot` is also restarted (`docker compose restart warp discord-bot`) — validates that the documented recovery procedure, not silent self-healing, is what actually works.
 5. Run `/play query:<a real YouTube URL>` in Discord and confirm playback works as before.
