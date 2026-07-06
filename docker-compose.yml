@@ -1,4 +1,26 @@
 services:
+  warp:
+    image: caomingjun/warp
+    container_name: eca-warp
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv4.conf.all.src_valid_mark=1
+    volumes:
+      - ./warp-data:/var/lib/cloudflare-warp
+    networks:
+      - bot-network
+    healthcheck:
+      test: ["CMD", "warp-cli", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
   discord-bot:
     build:
       context: .
@@ -7,8 +29,12 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    network_mode: "service:warp"
     depends_on:
-      - pot-provider
+      warp:
+        condition: service_healthy
+      pot-provider:
+        condition: service_started
     volumes:
       # Persist music and playlists
       - ./music:/app/music
@@ -20,8 +46,6 @@ services:
       # - ./cookies.txt:/app/cookies.txt
       # yt-dlp OAuth2 token cache (persists YouTube login across restarts)
       - ./ytdlp-cache:/root/.cache/yt-dlp
-    networks:
-      - bot-network
 
   pot-provider:
     image: brainicism/bgutil-ytdlp-pot-provider

@@ -34,6 +34,9 @@ cookies.txt
 # yt-dlp OAuth2 token cache (contains sensitive authentication data)
 ytdlp-cache/
 
+# Cloudflare WARP device registration/key material
+warp-data/
+
 # Müzik dosyaları ve playlist'ler
 music/
 playlists/
