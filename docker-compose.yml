@@ -29,9 +29,6 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    environment:
-      - YTDLP_YOUTUBE_OAUTH2_CLIENT_ID=${YOUTUBE_OAUTH2_CLIENT_ID:-}
-      - YTDLP_YOUTUBE_OAUTH2_CLIENT_SECRET=${YOUTUBE_OAUTH2_CLIENT_SECRET:-}
     network_mode: "service:warp"
     depends_on:
       warp:
@@ -47,7 +44,7 @@ services:
       # YouTube cookies (optional - only if you have cookies.txt file)
       # Uncomment the line below if you have a cookies.txt file
       # - ./cookies.txt:/app/cookies.txt
-      # yt-dlp OAuth2 token cache (persists YouTube login across restarts)
+      # yt-dlp cache (player signature functions etc. - persists across restarts)
       - ./ytdlp-cache:/root/.cache/yt-dlp
 
   pot-provider:

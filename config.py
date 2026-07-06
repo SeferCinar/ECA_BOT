@@ -30,13 +30,6 @@ class Config:
     # PO Token provider adresi (bot algılamasını hesaba gerek kalmadan aşmak için)
     POT_PROVIDER_BASE_URL = os.getenv('POT_PROVIDER_BASE_URL', 'http://pot-provider:4416')
 
-    # OAuth2 ile YouTube hesabı girişi (varsayılan açık - private bot için kabul edilebilir)
-    YOUTUBE_OAUTH2_ENABLED = os.getenv('YOUTUBE_OAUTH2_ENABLED', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
-
-    # Kendi Google Cloud OAuth2 client ID/secret'ın (varsayılan plugin client'ı rate-limit'e takılabiliyor)
-    YOUTUBE_OAUTH2_CLIENT_ID = os.getenv('YOUTUBE_OAUTH2_CLIENT_ID', None)
-    YOUTUBE_OAUTH2_CLIENT_SECRET = os.getenv('YOUTUBE_OAUTH2_CLIENT_SECRET', None)
-
     @classmethod
     def get_cookie_file(cls):
         """Cookie dosyası yolunu dinamik olarak belirle"""

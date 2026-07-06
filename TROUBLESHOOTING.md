@@ -134,9 +134,9 @@ docker compose restart warp discord-bot
 
 ---
 
-## 🤖 PO Token Provider ve OAuth2 (Kalıcı Sunucu Tarafı Çözüm)
+## 🤖 PO Token Provider (Kalıcı Sunucu Tarafı Çözüm)
 
-Cookie dosyası haftalar içinde expire olduğu için, kalıcı bir çözüm olarak iki katman eklendi. İkisi de mevcut cookie yöntemini bozmuyor, üstüne ekleniyor.
+Cookie dosyası haftalar içinde expire olduğu için, kalıcı bir çözüm olarak PO Token katmanı eklendi. Mevcut cookie yöntemini bozmuyor, üstüne ekleniyor.
 
 ### PO Token Provider
 
@@ -152,34 +152,13 @@ docker compose logs pot-provider
 
 `POT_PROVIDER_BASE_URL` env değişkeni ile adres override edilebilir (varsayılan: `http://pot-provider:4416`, docker-compose'daki servis adıyla eşleşir).
 
-### OAuth2 ile YouTube Hesabı Girişi
+### ❌ OAuth2 ile hesap girişi (KALDIRILDI - denemeyin)
 
-`YOUTUBE_OAUTH2_ENABLED` (varsayılan: `true`) açıkken, bot cookie yerine gerçek bir YouTube hesabına OAuth2 ile giriş yapar. Bu, cookie'lerin haftalık expire olma sorununu ortadan kaldırır.
+Bu botta daha önce `yt-dlp-youtube-oauth2` plugin'i ile YouTube hesabına OAuth2 girişi vardı. **Kasım 2024'te YouTube, OAuth device flow'u sunucu tarafında engelledi** — her deneme `HTTP Error 400: Bad Request` ile sonuçlanır. yt-dlp de kendi OAuth desteğini bu yüzden kaldırdı ([yt-dlp#11462](https://github.com/yt-dlp/yt-dlp/issues/11462)), plugin repo'su arşivlendi.
 
-⚠️ **Google Cloud OAuth2 Client ID oluşturma (HTTP 400 hatası alıyorsanız zorunlu):**
+Kendi Google Cloud client ID'nizi oluşturmak da işe yaramaz: plugin client bilgilerini kod içine gömülü ("YouTube on TV" client'ı) kullanıyordu ve dışarıdan client değiştirmeyi hiç desteklemiyordu — engellenen zaten akışın kendisi.
 
-Plugin'in varsayılan client ID'si çok kullanıldığı için rate-limit'e takılabilir ve `HTTP Error 400: Bad Request` hatası verebilir. Bu durumda kendi client ID'nizi oluşturmanız gerekir:
-
-1. https://console.cloud.google.com/apis/credentials adresine gidin
-2. "Create Credentials" > "OAuth client ID" seçin
-3. Application type: "Desktop app" (veya "Web application")
-4. Oluşturduktan sonra Client ID ve Client Secret'ı `.env` dosyanıza ekleyin:
-   ```
-   YOUTUBE_OAUTH2_CLIENT_ID=123456789-xxxx.apps.googleusercontent.com
-   YOUTUBE_OAUTH2_CLIENT_SECRET=GOCSPX-xxxx
-   ```
-
-**Tek seferlik kurulum (herhangi bir Docker host'ta, platformdan bağımsız):**
-
-```bash
-docker compose exec discord-bot yt-dlp --username oauth2 --password '' -f bestaudio -g "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-```
-
-Bu komut `https://www.google.com/device` adresini ve bir kod gösterir. Herhangi bir cihazdan/tarayıcıdan bu adrese gidip kodu girerek hesabı yetkilendirin. Token `./ytdlp-cache` klasöründe (docker-compose'da volume olarak bağlı) saklanır ve otomatik yenilenir — `ytdlp-cache` klasörü silinmediği sürece bu adımı tekrar yapmanız gerekmez, redeploy sonrası da geçerliliğini korur.
-
-**Not:** Coolify kullanıyorsanız yukarıdaki komutu Coolify'ın web terminalinden de çalıştırabilirsiniz — bu Coolify'a özgü bir adım değildir, sadece bir shell'e erişim gerektirir ve `docker` kurulu her yerde aynı şekilde çalışır.
-
-Cookie yöntemine geri dönmek isterseniz `.env` dosyasına `YOUTUBE_OAUTH2_ENABLED=false` ekleyin; bot otomatik olarak mevcut `cookies/cookies.txt` dosyasını kullanmaya devam eder.
+Güncel doğru yöntem: **cookies.txt + PO Token provider + WARP** (bu dokümandaki ilgili bölümlere bakın).
 
 ---
 

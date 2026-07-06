@@ -4,5 +4,4 @@ yt-dlp>=2024.1.0
 python-dotenv>=1.0.0
 PyNaCl>=1.5.0
 bgutil-ytdlp-pot-provider
-yt-dlp-youtube-oauth2
 

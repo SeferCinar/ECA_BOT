@@ -31,7 +31,7 @@ cookies/
 cookies.txt
 *.cookies
 
-# yt-dlp OAuth2 token cache (contains sensitive authentication data)
+# yt-dlp cache
 ytdlp-cache/
 
 # Cloudflare WARP device registration/key material

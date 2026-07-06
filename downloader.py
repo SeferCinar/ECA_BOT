@@ -93,13 +93,7 @@ class MusicDownloader:
         return None
     
     def _auth_options(self):
-        """yt-dlp için kimlik doğrulama ayarlarını döndür (oauth2 öncelikli, yoksa cookiefile)"""
-        if Config.YOUTUBE_OAUTH2_ENABLED:
-            opts = {'username': 'oauth2', 'password': ''}
-            if Config.YOUTUBE_OAUTH2_CLIENT_ID and Config.YOUTUBE_OAUTH2_CLIENT_SECRET:
-                opts['oauth2_client_id'] = Config.YOUTUBE_OAUTH2_CLIENT_ID
-                opts['oauth2_client_secret'] = Config.YOUTUBE_OAUTH2_CLIENT_SECRET
-            return opts
+        """yt-dlp için kimlik doğrulama ayarlarını döndür (cookiefile varsa)"""
         if self.cookie_file:
             return {'cookiefile': self.cookie_file}
         return {}
@@ -122,9 +116,7 @@ class MusicDownloader:
         else:
             print("⚠️  PO Token provider yapılandırılmadı.", flush=True)
 
-        if 'username' in auth:
-            print("✅ YouTube OAuth2 kimlik doğrulama aktif (username=oauth2)", flush=True)
-        elif 'cookiefile' in auth:
+        if 'cookiefile' in auth:
             print(f"✅ Cookie dosyası yüklendi: {auth['cookiefile']}", flush=True)
         else:
             print("⚠️  Kimlik doğrulama yapılandırılmadı. YouTube bot algılaması sorunları yaşanabilir.", flush=True)
@@ -173,15 +165,9 @@ class MusicDownloader:
                 '--no-download',
             ]
             
-            # Kimlik doğrulama ekle (oauth2 veya cookiefile)
+            # Kimlik doğrulama ekle (cookiefile varsa)
             auth = self._auth_options()
-            extractor_args = []
-            if 'username' in auth:
-                cmd.extend(['--username', auth['username'], '--password', auth['password']])
-                if auth.get('oauth2_client_id') and auth.get('oauth2_client_secret'):
-                    extractor_args.append(f"youtube:oauth2_client_id={auth['oauth2_client_id']};oauth2_client_secret={auth['oauth2_client_secret']}")
-                print("🔐 OAuth2 kimlik doğrulama kullanılıyor", flush=True)
-            elif 'cookiefile' in auth:
+            if 'cookiefile' in auth:
                 cmd.extend(['--cookies', auth['cookiefile']])
                 print(f"🔐 Cookie kullanılıyor: {auth['cookiefile']}", flush=True)
 
@@ -189,11 +175,8 @@ class MusicDownloader:
             pot_args = self._pot_extractor_args()
             if pot_args:
                 base_url = pot_args['youtubepot-bgutilhttp']['base_url'][0]
-                extractor_args.append(f'youtubepot-bgutilhttp:base_url={base_url}')
+                cmd.extend(['--extractor-args', f'youtubepot-bgutilhttp:base_url={base_url}'])
                 print(f"🔐 PO Token provider kullanılıyor: {base_url}", flush=True)
-
-            if extractor_args:
-                cmd.extend(['--extractor-args', ';'.join(extractor_args)])
 
             cmd.append(url)
             
