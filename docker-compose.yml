@@ -29,6 +29,9 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - YTDLP_YOUTUBE_OAUTH2_CLIENT_ID=${YOUTUBE_OAUTH2_CLIENT_ID:-}
+      - YTDLP_YOUTUBE_OAUTH2_CLIENT_SECRET=${YOUTUBE_OAUTH2_CLIENT_SECRET:-}
     network_mode: "service:warp"
     depends_on:
       warp:
