@@ -91,6 +91,39 @@ yt-dlp --cookies /app/cookies/cookies.txt --js-runtimes node -f bestaudio -g "ht
 
 ---
 
+## 🌐 Cloudflare WARP (VPS IP'sini Değiştirme)
+
+Bazı cloud/VPS sağlayıcılarının IP aralıkları, cookie/OAuth2/PO-Token durumundan bağımsız olarak YouTube tarafından engellenmiş olabilir. Bunu aşmak için `discord-bot` container'ının **tüm** ağ trafiği (Discord gateway/ses bağlantısı dahil), `warp` adlı bir sidecar servis üzerinden Cloudflare WARP'a yönlendirilir.
+
+### Nasıl çalışır
+
+`docker-compose.yml`'deki `warp` servisi (`caomingjun/warp` image'ı) açılışta anonim bir WARP cihazı olarak kayıt olur (Cloudflare hesabı gerekmez). `discord-bot` servisi `network_mode: "service:warp"` ile bu container'ın ağ namespace'ini birebir paylaşır — yani kendi ağı yoktur, tüm giden trafiği WARP arayüzünden çıkar.
+
+`pot-provider` servisi hâlâ `bot-network` üzerinde durur; `warp` da aynı ağa bağlı olduğu için `discord-bot`, `warp`'ın namespace'i üzerinden `http://pot-provider:4416` adresine erişmeye devam eder.
+
+### Doğrulama
+
+```bash
+docker compose ps
+# 'warp' servisi "healthy" görünmeli
+
+docker compose exec discord-bot curl -s https://www.cloudflare.com/cdn-cgi/trace | grep warp=
+# beklenen: warp=on
+
+docker compose exec discord-bot curl -s -o /dev/null -w "%{http_code}\n" http://pot-provider:4416
+# pot-provider'a hâlâ erişilebildiğini doğrular
+```
+
+### Kabul edilen risk
+
+`discord-bot`'un kendi ağı olmadığı için, `warp` container'ı çökerse veya yeniden başlarsa `discord-bot` **tüm** bağlantısını kaybeder — sadece YouTube erişimini değil, Discord gateway/ses bağlantısını da. `restart: unless-stopped` ve healthcheck'e bağlı `depends_on` bunu büyük ölçüde toparlar (discord.py kendi reconnect mantığıyla `warp` geri geldiğinde otomatik bağlanır) ama garanti değildir. Bu, tüm trafiği tek bir noktadan geçirmenin bilinçli olarak kabul edilmiş bir bedelidir.
+
+### Health check endpoint kullanıyorsanız
+
+`ENABLE_HEALTH_SERVER=1` / `PORT` (bkz. `config.py`, `bot.py`'deki `_start_health_server_if_enabled`) ileride bir deployment platformu için açılırsa, `ports:` eşlemesinin `discord-bot` yerine **`warp` servisine** eklenmesi gerekir — dinleyen soket fiziksel olarak `warp`'ın ağ namespace'inde yaşar.
+
+---
+
 ## 🤖 PO Token Provider ve OAuth2 (Kalıcı Sunucu Tarafı Çözüm)
 
 Cookie dosyası haftalar içinde expire olduğu için, kalıcı bir çözüm olarak iki katman eklendi. İkisi de mevcut cookie yöntemini bozmuyor, üstüne ekleniyor.
