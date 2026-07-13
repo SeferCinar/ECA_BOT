@@ -30,6 +30,27 @@ class Config:
     # PO Token provider adresi (bot algılamasını hesaba gerek kalmadan aşmak için)
     POT_PROVIDER_BASE_URL = os.getenv('POT_PROVIDER_BASE_URL', 'http://pot-provider:4416')
 
+    # Web control panel
+    WEB_UI_TOKEN = os.getenv('WEB_UI_TOKEN', '').strip()
+    WEB_UI_GUILD_ID = os.getenv('WEB_UI_GUILD_ID', '').strip() or None
+    WEB_UI_SESSION_SECRET = os.getenv('WEB_UI_SESSION_SECRET', '').strip()
+
+    @classmethod
+    def web_port(cls) -> int:
+        port_str = (os.getenv('PORT') or os.getenv('HEALTHCHECK_PORT') or '8080').strip()
+        try:
+            return int(port_str)
+        except ValueError:
+            return 8080
+
+    @classmethod
+    def web_http_mode(cls) -> str:
+        """Return 'full', 'health', or 'off'."""
+        if cls.WEB_UI_TOKEN:
+            return 'full'
+        enabled = os.getenv('ENABLE_HEALTH_SERVER', '').strip().lower() in ('1', 'true', 'yes', 'on')
+        return 'health' if enabled else 'off'
+
     @classmethod
     def get_cookie_file(cls):
         """Cookie dosyası yolunu dinamik olarak belirle"""
