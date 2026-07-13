@@ -112,6 +112,11 @@ def test_playlist_crud_via_api(tmp_path, monkeypatch):
     assert r.status_code == 200
     assert "a.mp3" in r.json()["songs"]
 
+    r = client.get("/api/playlists/webmix", headers=headers)
+    assert r.status_code == 200
+    assert r.json()["name"] == "webmix"
+    assert "a.mp3" in r.json()["songs"]
+
     r = client.get("/api/playlists", headers=headers)
     assert r.status_code == 200
     assert any(p["name"] == "webmix" for p in r.json()["playlists"])

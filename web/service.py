@@ -288,6 +288,16 @@ class MusicService:
                     )
         return out
 
+    def get_playlist(self, name: str) -> dict:
+        data = self.playlist_manager._load_playlist(name)
+        if not data:
+            raise ServiceError("Not found", "NOT_FOUND", 404)
+        return {
+            "name": data.get("name", name),
+            "songs": list(data.get("songs") or []),
+            "count": len(data.get("songs") or []),
+        }
+
     def create_playlist(self, name: str) -> dict:
         import os
 

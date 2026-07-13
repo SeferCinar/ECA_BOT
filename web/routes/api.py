@@ -180,6 +180,14 @@ async def playlists(request: Request):
     return {"playlists": svc(request).list_playlists()}
 
 
+@router.get("/playlists/{name}")
+async def playlists_get(name: str, request: Request):
+    try:
+        return svc(request).get_playlist(name)
+    except ServiceError as e:
+        handle(e)
+
+
 @router.post("/playlists")
 async def playlists_create(body: NameBody, request: Request):
     try:

@@ -637,8 +637,13 @@
           toastError(err);
         }
       });
-      li.querySelector('[data-act="open"]').addEventListener("click", function () {
-        openPlaylistDetail(name, pl.songs || []);
+      li.querySelector('[data-act="open"]').addEventListener("click", async function () {
+        try {
+          const data = await api("/api/playlists/" + encodeURIComponent(name));
+          openPlaylistDetail(name, (data && data.songs) || []);
+        } catch (err) {
+          toastError(err);
+        }
       });
       li.querySelector('[data-act="del"]').addEventListener("click", async function () {
         if (!confirm('"' + name + '" silinsin mi?')) return;
