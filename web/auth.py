@@ -62,7 +62,10 @@ def record_login_failure(ip: str) -> None:
 def tokens_match(expected: str, provided: str) -> bool:
     if not expected or not provided:
         return False
-    return hmac.compare_digest(expected, provided)
+    try:
+        return hmac.compare_digest(expected, provided)
+    except (TypeError, ValueError):
+        return False
 
 
 async def require_auth(
