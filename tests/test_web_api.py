@@ -64,3 +64,64 @@ def test_status_requires_auth_and_works_with_bearer():
     r = client.get("/api/status", headers={"Authorization": "Bearer t"})
     assert r.status_code == 200
     assert r.json()["guild_name"] == "Test"
+
+
+def test_library_list_and_path_traversal_rejected():
+    bot = FakeBot()
+    player = FakePlayer()
+    app = create_app(bot=bot, full_ui=True)
+    app.state.web_token = "t"
+    app.state.session_secret = create_session_secret("s")
+    app.state.music_service = MusicService(bot, lambda gid: player, None, None, "1")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer t"}
+
+    r = client.get("/api/library", headers=headers)
+    assert r.status_code == 200
+    assert "files" in r.json()
+
+    r = client.post(
+        "/api/library/play",
+        headers=headers,
+        json={"name": "../etc/passwd"},
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"]["code"] == "INVALID_PATH"
+
+
+def test_playlist_crud_via_api(tmp_path, monkeypatch):
+    from playlist import PlaylistManager
+    from config import Config
+
+    monkeypatch.setattr(Config, "PLAYLISTS_DIR", str(tmp_path))
+    bot = FakeBot()
+    player = FakePlayer()
+    pm = PlaylistManager()
+    app = create_app(bot=bot, full_ui=True)
+    app.state.web_token = "t"
+    app.state.session_secret = create_session_secret("s")
+    app.state.music_service = MusicService(bot, lambda gid: player, None, pm, "1")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer t"}
+
+    r = client.post("/api/playlists", headers=headers, json={"name": "webmix"})
+    assert r.status_code == 200
+    assert r.json()["name"] == "webmix"
+
+    r = client.post("/api/playlists/webmix/add", headers=headers, json={"song": "a.mp3"})
+    assert r.status_code == 200
+    assert "a.mp3" in r.json()["songs"]
+
+    r = client.get("/api/playlists", headers=headers)
+    assert r.status_code == 200
+    assert any(p["name"] == "webmix" for p in r.json()["playlists"])
+
+    r = client.post(
+        "/api/playlists/webmix/remove", headers=headers, json={"song": "a.mp3"}
+    )
+    assert r.status_code == 200
+    assert r.json()["songs"] == []
+
+    r = client.delete("/api/playlists/webmix", headers=headers)
+    assert r.status_code == 200
+    assert r.json()["ok"] is True

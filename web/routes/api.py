@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from web.auth import require_auth
@@ -92,5 +92,129 @@ async def voice_join(body: JoinBody, request: Request):
 async def voice_leave(request: Request, guild_id: Optional[str] = None):
     try:
         return await svc(request).leave_voice(guild_id)
+    except ServiceError as e:
+        handle(e)
+
+
+class PlayBody(BaseModel):
+    query: str
+    download: bool = False
+    guild_id: Optional[str] = None
+
+
+class SearchBody(BaseModel):
+    query: str
+    guild_id: Optional[str] = None
+
+
+class SearchPlayBody(BaseModel):
+    index: int
+    guild_id: Optional[str] = None
+
+
+class NameBody(BaseModel):
+    name: str
+
+
+class SongBody(BaseModel):
+    song: str
+
+
+class LibraryPlayBody(BaseModel):
+    name: str
+    guild_id: Optional[str] = None
+
+
+@router.post("/play")
+async def play(body: PlayBody, request: Request):
+    try:
+        return await svc(request).play(body.query, body.download, body.guild_id)
+    except ServiceError as e:
+        handle(e)
+
+
+@router.post("/search")
+async def search(
+    body: SearchBody,
+    request: Request,
+    eca_session: Optional[str] = Cookie(default=None, alias="eca_session"),
+    authorization: Optional[str] = Header(default=None),
+):
+    key = eca_session or authorization or "default"
+    try:
+        results = await svc(request).search(body.query, key, body.guild_id)
+        return {"results": results}
+    except ServiceError as e:
+        handle(e)
+
+
+@router.post("/search/play")
+async def search_play(
+    body: SearchPlayBody,
+    request: Request,
+    eca_session: Optional[str] = Cookie(default=None, alias="eca_session"),
+    authorization: Optional[str] = Header(default=None),
+):
+    key = eca_session or authorization or "default"
+    try:
+        return await svc(request).search_play(body.index, key, body.guild_id)
+    except ServiceError as e:
+        handle(e)
+
+
+@router.get("/library")
+async def library(request: Request):
+    return {"files": svc(request).list_library()}
+
+
+@router.post("/library/play")
+async def library_play(body: LibraryPlayBody, request: Request):
+    try:
+        return await svc(request).library_play(body.name, body.guild_id)
+    except ServiceError as e:
+        handle(e)
+
+
+@router.get("/playlists")
+async def playlists(request: Request):
+    return {"playlists": svc(request).list_playlists()}
+
+
+@router.post("/playlists")
+async def playlists_create(body: NameBody, request: Request):
+    try:
+        return svc(request).create_playlist(body.name)
+    except ServiceError as e:
+        handle(e)
+
+
+@router.delete("/playlists/{name}")
+async def playlists_delete(name: str, request: Request):
+    try:
+        return svc(request).delete_playlist(name)
+    except ServiceError as e:
+        handle(e)
+
+
+@router.post("/playlists/{name}/add")
+async def playlists_add(name: str, body: SongBody, request: Request):
+    try:
+        return svc(request).playlist_add(name, body.song)
+    except ServiceError as e:
+        handle(e)
+
+
+@router.post("/playlists/{name}/remove")
+async def playlists_remove(name: str, body: SongBody, request: Request):
+    try:
+        return svc(request).playlist_remove(name, body.song)
+    except ServiceError as e:
+        handle(e)
+
+
+@router.post("/playlists/{name}/play")
+async def playlists_play(name: str, request: Request, guild_id: Optional[str] = None):
+    try:
+        return await svc(request).playlist_play(name, guild_id)
     except ServiceError as e:
         handle(e)
