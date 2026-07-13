@@ -532,10 +532,11 @@ if __name__ == '__main__':
             print("ℹ️ Web/health HTTP kapalı (WEB_UI_TOKEN veya ENABLE_HEALTH_SERVER yok)", flush=True)
             return
         from web.app import create_app, start_web_server
+        from web.auth import create_session_secret
         full = mode == 'full'
         app = create_app(bot=bot, full_ui=full)
         app.state.web_token = Config.WEB_UI_TOKEN
-        # session secret filled in Task 2
+        app.state.session_secret = create_session_secret(Config.WEB_UI_SESSION_SECRET)
         port = Config.web_port()
         bot.loop.create_task(start_web_server(app, port=port))
         print(f"✅ HTTP sunucu ({mode}): http://0.0.0.0:{port}/health", flush=True)
