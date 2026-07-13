@@ -70,8 +70,10 @@ def create_app(*, bot: Any = None, full_ui: bool = False) -> FastAPI:
             return resp
 
         from web.routes.api import router as api_router
+        from web.routes.ws import router as ws_router
 
         app.include_router(api_router)
+        app.include_router(ws_router)
         # auth login routes already registered without require_auth
         if STATIC_DIR.is_dir():
             app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
