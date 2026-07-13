@@ -131,6 +131,84 @@ async def test_pause_resume_stop_skip_with_no_interaction():
 
 
 @pytest.mark.asyncio
+async def test_skip_only_stops_when_voice_client_present():
+    """skip must not call play_next when VC exists — after-callback advances."""
+    p = MusicPlayer(FakeBot())
+    vc = MagicMock()
+    p.set_voice_client(vc)
+    p.is_playing = True
+    p.current = {"name": "now", "user": WebUser()}
+    p.queue.append({
+        "file": "/tmp/next.mp3",
+        "name": "next.mp3",
+        "user": WebUser(),
+        "is_stream": False,
+    })
+
+    with patch.object(p, "play_next", new_callable=AsyncMock) as mock_next:
+        await p.skip(None)
+        mock_next.assert_not_called()
+    vc.stop.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_skip_without_voice_calls_play_next():
+    p = MusicPlayer(FakeBot())
+    p.voice_client = None
+    p.is_playing = True
+    p.current = {"name": "now", "user": WebUser()}
+
+    with patch.object(p, "play_next", new_callable=AsyncMock) as mock_next:
+        await p.skip(None)
+        mock_next.assert_called_once_with(None)
+
+
+def test_cleanup_clears_voice_client():
+    p = MusicPlayer(FakeBot())
+    vc = MagicMock()
+    p.set_voice_client(vc)
+    p.is_playing = True
+    p.current = {"name": "x", "user": WebUser()}
+    p.queue.append({"name": "q", "user": WebUser()})
+    p.cleanup()
+    assert p.voice_client is None
+    assert p.is_playing is False
+    assert p.current is None
+    assert len(p.queue) == 0
+    vc.stop.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_play_next_no_voice_requeues_song():
+    """When VC is missing, song must return to front of queue and is_playing False."""
+    p = MusicPlayer(FakeBot())
+    p.voice_client = None
+    user = WebUser()
+    song = {
+        "file": "/tmp/song.mp3",
+        "name": "song.mp3",
+        "user": user,
+        "is_stream": False,
+    }
+    p.queue.append(song)
+
+    await p.play_next(None)
+
+    assert p.is_playing is False
+    assert p.current is None
+    assert len(p.queue) == 1
+    assert p.queue[0]["name"] == "song.mp3"
+
+
+@pytest.mark.asyncio
+async def test_add_to_queue_missing_file_returns_false():
+    p = MusicPlayer(FakeBot())
+    ok = await p.add_to_queue(None, "/nonexistent/path/nope.mp3", WebUser())
+    assert ok is False
+    assert len(p.queue) == 0
+
+
+@pytest.mark.asyncio
 async def test_play_next_with_none_interaction_uses_voice_client():
     """play_next(interaction=None) should advance when voice_client is set."""
     p = MusicPlayer(FakeBot())

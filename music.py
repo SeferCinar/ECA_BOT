@@ -74,10 +74,10 @@ class MusicPlayer:
         }
     
     async def add_to_queue(self, interaction, file_path, user):
-        """Kuyruğa şarkı ekle (yerel dosya)"""
+        """Kuyruğa şarkı ekle (yerel dosya). Returns True on success."""
         if not os.path.exists(file_path):
             await self._send_message(interaction, f"❌ Dosya bulunamadı: {file_path}")
-            return
+            return False
         
         song_name = os.path.basename(file_path)
         self.queue.append({
@@ -91,9 +91,10 @@ class MusicPlayer:
         
         if not self.is_playing and not self.is_paused:
             await self.play_next(interaction)
+        return True
     
     async def add_stream_to_queue(self, interaction, stream_info, user):
-        """Kuyruğa stream ekle (indirmeden)"""
+        """Kuyruğa stream ekle (indirmeden). Returns True on success."""
         self.queue.append({
             'stream_url': stream_info['url'],
             'name': stream_info['title'],
@@ -106,6 +107,7 @@ class MusicPlayer:
         
         if not self.is_playing and not self.is_paused:
             await self.play_next(interaction)
+        return True
     
     async def play_next(self, interaction):
         """Sıradaki şarkıyı çal. interaction may be None for web path."""
@@ -118,11 +120,16 @@ class MusicPlayer:
             await self._send_message(interaction, "📭 Kuyruk boş!")
             return
         
-        self.current = self.queue.popleft()
+        song = self.queue.popleft()
+        self.current = song
         self.is_playing = True
         
         voice_client = self._get_voice_client(interaction)
         if voice_client is None:
+            # Don't drop the track or leave is_playing True without a client
+            self.queue.appendleft(song)
+            self.current = None
+            self.is_playing = False
             await self._send_message(interaction, "❌ Ses kanalına bağlı değilim!")
             return
         
@@ -167,16 +174,18 @@ class MusicPlayer:
         await self._send_message(interaction, f"{source_type} Şimdi çalıyor: **{self.current['name']}** (İsteyen: {self.current['user'].mention})")
     
     async def skip(self, interaction):
-        """Şarkıyı geç"""
+        """Şarkıyı geç. Rely on voice after-callback to advance; only call play_next if no VC."""
         if not self.is_playing:
             await self._send_message(interaction, "❌ Şu anda hiçbir şarkı çalmıyor!")
             return
         
         if self.voice_client:
+            # stop() fires after-callback which calls play_next — do not double-advance
             self.voice_client.stop()
+        else:
+            await self.play_next(interaction)
         
         await self._send_message(interaction, "⏭️ Şarkı geçildi!")
-        await self.play_next(interaction)
     
     async def stop(self, interaction):
         """Müziği durdur"""
@@ -283,9 +292,10 @@ class MusicPlayer:
         await self._send_message(interaction, "🔀 Kuyruk karıştırıldı!")
     
     def cleanup(self):
-        """Temizlik"""
+        """Temizlik — stop playback and clear voice client reference."""
         if self.voice_client:
             self.voice_client.stop()
+        self.voice_client = None
         self.queue.clear()
         self.is_playing = False
         self.is_paused = False

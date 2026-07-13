@@ -59,8 +59,8 @@ class MusicService:
     def _player(self, guild_id: Optional[str] = None):
         g = self._guild(guild_id)
         player = self.get_player(g.id)
-        if g.voice_client:
-            player.set_voice_client(g.voice_client)
+        # Always sync (including None) so leave/disconnect cannot leave a stale VC
+        player.set_voice_client(g.voice_client)
         return player, g
 
     def get_status(self, guild_id: Optional[str] = None) -> dict:
@@ -161,13 +161,39 @@ class MusicService:
             raise ServiceError("Not in a voice channel", "NOT_CONNECTED", 409)
         await g.voice_client.disconnect()
         player = self.get_player(g.id)
-        player.cleanup()
+        player.cleanup()  # stops playback and sets voice_client = None
         return {"ok": True}
 
-    async def play(self, query: str, download: bool = False, guild_id: Optional[str] = None) -> dict:
+    @staticmethod
+    def _safe_local_music_path(query: str) -> str:
+        """Resolve local basename under MUSIC_DIR; reject path traversal."""
         import os
         from config import Config
 
+        q = (query or "").strip()
+        base = os.path.basename(q)
+        if not q or base != q or ".." in q or "/" in q or "\\" in q:
+            raise ServiceError("Invalid file name", "INVALID_PATH", 400)
+
+        music_root = os.path.realpath(Config.MUSIC_DIR)
+        file_path = os.path.join(Config.MUSIC_DIR, base)
+        if not os.path.exists(file_path):
+            for ext in [".mp3", ".wav", ".ogg", ".m4a", ".flac"]:
+                test = file_path + ext
+                if os.path.exists(test):
+                    file_path = test
+                    break
+            else:
+                raise ServiceError("File not found; use search for YouTube", "NOT_FOUND", 404)
+
+        resolved = os.path.realpath(file_path)
+        if resolved != music_root and not resolved.startswith(music_root + os.sep):
+            raise ServiceError("Invalid file name", "INVALID_PATH", 400)
+        if not os.path.isfile(resolved):
+            raise ServiceError("File not found; use search for YouTube", "NOT_FOUND", 404)
+        return resolved
+
+    async def play(self, query: str, download: bool = False, guild_id: Optional[str] = None) -> dict:
         player, g = self._player(guild_id)
         if g.voice_client is None:
             raise ServiceError("Join a voice channel first", "VOICE_NOT_CONNECTED", 409)
@@ -183,27 +209,25 @@ class MusicService:
                     path = await self.downloader.download_and_save(q)
                     if not path:
                         raise ServiceError("Download failed", "DOWNLOAD_FAILED", 502)
-                    await player.add_to_queue(None, path, user)
+                    ok = await player.add_to_queue(None, path, user)
+                    if not ok:
+                        raise ServiceError("File not found after download", "NOT_FOUND", 404)
                 else:
                     info = await self.downloader.get_stream_url(q)
                     if not info:
                         raise ServiceError("Stream failed", "STREAM_FAILED", 502)
-                    await player.add_stream_to_queue(None, info, user)
+                    ok = await player.add_stream_to_queue(None, info, user)
+                    if not ok:
+                        raise ServiceError("Failed to enqueue stream", "PLAY_ERROR", 502)
             except ServiceError:
                 raise
             except Exception as e:
                 raise ServiceError(str(e), "PLAY_ERROR", 502)
         else:
-            file_path = os.path.join(Config.MUSIC_DIR, q)
-            if not os.path.exists(file_path):
-                for ext in [".mp3", ".wav", ".ogg", ".m4a", ".flac"]:
-                    test = file_path + ext
-                    if os.path.exists(test):
-                        file_path = test
-                        break
-                else:
-                    raise ServiceError("File not found; use search for YouTube", "NOT_FOUND", 404)
-            await player.add_to_queue(None, file_path, user)
+            file_path = self._safe_local_music_path(q)
+            ok = await player.add_to_queue(None, file_path, user)
+            if not ok:
+                raise ServiceError("File not found; use search for YouTube", "NOT_FOUND", 404)
         return self.state_snapshot(str(g.id))
 
     async def search(self, query: str, session_key: str, guild_id: Optional[str] = None) -> list:
