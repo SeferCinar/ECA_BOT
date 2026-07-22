@@ -216,6 +216,8 @@ Eğer Coolify'da uygulama "unhealthy" görünüp restart döngüsüne giriyorsa 
 Sonra health endpoint:
 - `/health` veya `/healthz`
 
+> **Not:** `WEB_UI_TOKEN` ayarlandığında health endpoint panelle birlikte zaten açılır; sadece health için token gerekmez. Ayrıntılar için aşağıdaki **Web kontrol paneli** bölümüne bakın.
+
 ### 4. Cookie Dosyası Oluşturma
 
 Cookie dosyasını yerel bilgisayarınızda oluşturup Coolify'a yükleyin:
@@ -228,6 +230,55 @@ yt-dlp --cookies-from-browser chrome --cookies cookies.txt
 ```
 
 **Önemli:** Cookie dosyası formatı Netscape formatında olmalı (ilk satır `# Netscape HTTP Cookie File` ile başlamalı).
+
+## Web kontrol paneli
+
+Botu tarayıcıdan yönetmek için isteğe bağlı bir web arayüzü vardır (ses kanalına katıl, çal, atla, arama, playlist, kütüphane).
+
+### Kurulum
+
+1. `.env` dosyasına bir gizli token ekleyin (ve isteğe bağlı sunucu kimliği):
+
+```env
+WEB_UI_TOKEN=uzun-rastgele-gizli-token
+WEB_UI_GUILD_ID=123456789012345678
+# Çoklu instance / restart sonrası oturumun bozulmaması için önerilir:
+WEB_UI_SESSION_SECRET=oturum-imza-gizlisi
+PORT=8080
+```
+
+- `WEB_UI_TOKEN` doluysa tam panel + API + `/health` açılır.
+- `WEB_UI_GUILD_ID` bot birden fazla sunucudaysa zorunludur; tek sunucuda otomatik seçilir.
+- `WEB_UI_SESSION_SECRET` yoksa süreç her açılışta rastgele imza üretir (oturumlar restart’ta düşer).
+
+2. Botu çalıştırın (`python bot.py` veya Docker Compose). Docker’da paneli dışarı açmak için ilgili serviste `ports:` ile `8080` (veya `PORT`) map edin; WARP `network_mode` kullanıyorsanız port eşlemesi `warp` servisinde olmalıdır.
+
+3. Tarayıcıda açın: `http://localhost:8080/` (uzak sunucuda host ve port’u kendi adresinizle değiştirin).
+
+4. Giriş ekranında `WEB_UI_TOKEN` değerini girin → panel açılır.
+
+5. Kullanım özeti:
+   - Ses kanallarını listeden seçip **Katıl**
+   - URL / dosya adı ile **Çal**, arama sonuçlarından seç, skip / pause / volume
+   - Playlist oluştur / ekle / çal; kütüphaneden dosya çal
+   - **Çıkış** sonrası API istekleri 401 döner
+
+### Güvenlik
+
+- Token’ı güçlü ve rastgele tutun; paneli internete açıyorsanız **mutlaka** uzun bir `WEB_UI_TOKEN` kullanın (ters proxy + HTTPS önerilir).
+- Token’ı Git’e veya sohbete yapıştırmayın; yalnızca `.env` / deploy secrets içinde tutun.
+- Oturum çerezi HttpOnly imzalıdır; API ayrıca `Authorization: Bearer <WEB_UI_TOKEN>` kabul eder.
+
+### Sadece health (panel kapalı)
+
+`WEB_UI_TOKEN` **yokken** yalnızca sağlık kontrolü istiyorsanız:
+
+```env
+ENABLE_HEALTH_SERVER=1
+PORT=8080
+```
+
+Bu modda `/health` (ve `/healthz`) cevap verir; kontrol paneli ve korumalı API açılmaz.
 
 ## Komutlar
 

@@ -134,6 +134,18 @@ docker compose restart warp discord-bot
 
 ---
 
+## 🌐 Web kontrol paneli
+
+### Login / API 401
+
+Yanlış veya eksik `WEB_UI_TOKEN`, süresi dolmuş oturum çerezi veya çıkış yapılmış oturum `401` üretir. `.env` içindeki token ile giriş ekranındaki değeri karşılaştırın; botu yeniden başlattıysanız ve `WEB_UI_SESSION_SECRET` ayarlı değilse eski çerezler geçersiz olur — tekrar giriş yapın. API için `Authorization: Bearer <WEB_UI_TOKEN>` veya geçerli oturum çerezi gerekir.
+
+### `GUILD_REQUIRED` / guild seçilemiyor
+
+Bot birden fazla Discord sunucusundaysa ve istekte `guild_id` yoksa API `400` ve `GUILD_REQUIRED` döner. `.env` içine `WEB_UI_GUILD_ID=<sunucu_id>` ekleyin (Discord’da sunucu ayarları → Widget veya geliştirici modunda sunucu ID kopyalama) veya API çağrılarında `guild_id` gönderin. Tek sunucuda bot otomatik olarak o sunucuyu kullanır.
+
+---
+
 ## 🤖 PO Token Provider (Kalıcı Sunucu Tarafı Çözüm)
 
 Cookie dosyası haftalar içinde expire olduğu için, kalıcı bir çözüm olarak PO Token katmanı eklendi. Mevcut cookie yöntemini bozmuyor, üstüne ekleniyor.

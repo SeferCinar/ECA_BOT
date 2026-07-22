@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ECA_BOT</title>
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <div id="login-view" class="view">
+    <form id="login-form" class="card login-card">
+      <div class="login-logo" aria-hidden="true">♪</div>
+      <h1>ECA_BOT</h1>
+      <p class="muted">Web kontrol paneli</p>
+      <label class="field-label" for="token">Erişim tokeni</label>
+      <input type="password" id="token" placeholder="WEB_UI_TOKEN" autocomplete="current-password" required />
+      <button type="submit" class="btn btn-primary btn-block">Giriş</button>
+      <p id="login-error" class="error" hidden></p>
+    </form>
+  </div>
+
+  <div id="app-view" class="view" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">♪</span>
+        <span>ECA_BOT</span>
+      </div>
+      <div id="status-line" class="status-line">
+        <span class="pill" id="pill-online" title="Bot">…</span>
+        <span class="pill" id="pill-voice" title="Ses">…</span>
+        <span class="pill muted" id="pill-guild" title="Sunucu">…</span>
+      </div>
+      <button id="logout-btn" type="button" class="btn btn-ghost">Çıkış</button>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button type="button" data-tab="player" class="tab active" role="tab">Player</button>
+      <button type="button" data-tab="queue" class="tab" role="tab">Kuyruk</button>
+      <button type="button" data-tab="search" class="tab" role="tab">Ara / Çal</button>
+      <button type="button" data-tab="playlists" class="tab" role="tab">Playlist</button>
+      <button type="button" data-tab="library" class="tab" role="tab">Kütüphane</button>
+    </nav>
+
+    <main>
+      <section id="tab-player" class="tab-panel" role="tabpanel">
+        <div class="card">
+          <h2>Ses kanalı</h2>
+          <p class="muted small">Botun katılacağı Discord ses kanalını seçin.</p>
+          <div class="row">
+            <select id="channel-select" class="grow">
+              <option value="">Kanallar yükleniyor…</option>
+            </select>
+            <button id="join-btn" type="button" class="btn btn-primary">Katıl</button>
+            <button id="leave-btn" type="button" class="btn btn-secondary">Ayrıl</button>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Hızlı çal</h2>
+          <p class="muted small">YouTube URL, arama metni veya yerel dosya adı.</p>
+          <div class="stack">
+            <input id="play-query" type="text" placeholder="URL veya dosya adı" />
+            <div class="row wrap">
+              <label class="check">
+                <input type="checkbox" id="play-download" />
+                <span>İndir (yerel kaydet)</span>
+              </label>
+              <button id="play-btn" type="button" class="btn btn-primary">Çal</button>
+            </div>
+          </div>
+        </div>
+        <div class="card now-card">
+          <h2>Şimdi çalıyor</h2>
+          <div id="player-now" class="now-detail">
+            <div class="now-art" aria-hidden="true">♪</div>
+            <div>
+              <div id="player-now-title" class="now-name">Çalmıyor</div>
+              <div id="player-now-meta" class="muted small">—</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-queue" class="tab-panel" role="tabpanel" hidden>
+        <div class="card">
+          <div class="card-head">
+            <h2>Kuyruk</h2>
+            <span id="queue-count" class="badge">0</span>
+          </div>
+          <ul id="queue-list" class="list"></ul>
+          <p id="queue-empty" class="empty muted">Kuyruk boş</p>
+        </div>
+      </section>
+
+      <section id="tab-search" class="tab-panel" role="tabpanel" hidden>
+        <div class="card">
+          <h2>YouTube ara</h2>
+          <div class="row">
+            <input id="search-query" type="search" class="grow" placeholder="Şarkı veya video ara…" />
+            <button id="search-btn" type="button" class="btn btn-primary">Ara</button>
+          </div>
+          <ul id="search-results" class="list results"></ul>
+          <p id="search-empty" class="empty muted">Sonuç yok — arama yapın</p>
+        </div>
+      </section>
+
+      <section id="tab-playlists" class="tab-panel" role="tabpanel" hidden>
+        <div class="card">
+          <h2>Yeni playlist</h2>
+          <div class="row">
+            <input id="pl-name" type="text" class="grow" placeholder="Playlist adı" />
+            <button id="pl-create" type="button" class="btn btn-primary">Oluştur</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h2>Playlistler</h2>
+            <button id="pl-refresh" type="button" class="btn btn-ghost btn-sm">Yenile</button>
+          </div>
+          <ul id="pl-list" class="list"></ul>
+          <p id="pl-empty" class="empty muted">Henüz playlist yok</p>
+        </div>
+        <div id="pl-detail" class="card" hidden>
+          <div class="card-head">
+            <h2 id="pl-detail-title">Playlist</h2>
+            <button id="pl-detail-close" type="button" class="btn btn-ghost btn-sm">Kapat</button>
+          </div>
+          <div class="row">
+            <input id="pl-song" type="text" class="grow" placeholder="Şarkı URL / dosya adı" />
+            <button id="pl-add" type="button" class="btn btn-secondary">Ekle</button>
+          </div>
+          <ul id="pl-songs" class="list"></ul>
+          <p id="pl-songs-empty" class="empty muted">Şarkı yok</p>
+        </div>
+      </section>
+
+      <section id="tab-library" class="tab-panel" role="tabpanel" hidden>
+        <div class="card">
+          <div class="card-head">
+            <h2>Yerel kütüphane</h2>
+            <button id="lib-refresh" type="button" class="btn btn-ghost btn-sm">Yenile</button>
+          </div>
+          <ul id="lib-list" class="list"></ul>
+          <p id="lib-empty" class="empty muted">Dosya bulunamadı</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="player-bar">
+      <div class="np">
+        <div class="np-art" aria-hidden="true">♪</div>
+        <div class="np-text">
+          <div id="np-title" class="np-title">Çalmıyor</div>
+          <div id="np-sub" class="np-sub muted">—</div>
+        </div>
+      </div>
+      <div class="controls">
+        <button id="btn-pause" type="button" class="btn btn-icon" title="Pause">⏸</button>
+        <button id="btn-resume" type="button" class="btn btn-icon btn-green" title="Resume">▶</button>
+        <button id="btn-skip" type="button" class="btn btn-icon" title="Skip">⏭</button>
+        <button id="btn-stop" type="button" class="btn btn-icon" title="Stop">⏹</button>
+        <button id="btn-shuffle" type="button" class="btn btn-icon" title="Shuffle">🔀</button>
+        <button id="btn-clear" type="button" class="btn btn-icon" title="Clear queue">🗑</button>
+      </div>
+      <div class="vol-wrap">
+        <span class="vol-icon" aria-hidden="true">🔊</span>
+        <input type="range" id="vol" min="0" max="100" value="50" title="Ses" />
+        <span id="vol-label" class="vol-label">50</span>
+      </div>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/js/app.js"></script>
+</body>
+</html>
