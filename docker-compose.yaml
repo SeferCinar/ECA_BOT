@@ -46,6 +46,7 @@ services:
       # - ./cookies.txt:/app/cookies.txt
       # yt-dlp cache (player signature functions etc. - persists across restarts)
       - ./ytdlp-cache:/root/.cache/yt-dlp
+      - /data/coolify/app-data/cookies.txt:/app/cookies.txt
 
   pot-provider:
     image: brainicism/bgutil-ytdlp-pot-provider
