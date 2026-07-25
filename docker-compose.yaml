@@ -47,6 +47,8 @@ services:
       # yt-dlp cache (player signature functions etc. - persists across restarts)
       - ./ytdlp-cache:/root/.cache/yt-dlp
       - /data/coolify/app-data/cookies.txt:/app/cookies.txt
+    ports:
+      - "8080:80"
 
   pot-provider:
     image: brainicism/bgutil-ytdlp-pot-provider
