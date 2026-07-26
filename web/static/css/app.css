@@ -715,7 +715,7 @@ select:focus {
 }
 
 /* —— Responsive —— */
-@media (max-width: 959px) {
+@media (max-width: 700px) {
   .app-layout {
     grid-template-columns: 1fr;
   }
