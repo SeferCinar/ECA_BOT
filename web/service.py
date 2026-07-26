@@ -401,6 +401,10 @@ class MusicService:
         except Exception as error:
             raise ServiceError(str(error), "IMPORT_FAILED", 502)
 
+        data = self.playlist_manager._load_playlist(name)
+        if not data:
+            raise ServiceError("Not found", "NOT_FOUND", 404)
+
         songs = list(data.get("songs") or [])
         seen = set(songs)
         added = 0
@@ -415,7 +419,8 @@ class MusicService:
 
         data["songs"] = songs
         if added:
-            self.playlist_manager._save_playlist(name, data)
+            if not self.playlist_manager._save_playlist(name, data):
+                raise ServiceError("Save failed", "SAVE_FAILED", 500)
         return {
             "name": data.get("name", name),
             "songs": songs,

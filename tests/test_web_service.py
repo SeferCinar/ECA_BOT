@@ -1,3 +1,4 @@
+import asyncio
 import os
 from unittest.mock import MagicMock, AsyncMock
 
@@ -264,6 +265,68 @@ async def test_playlist_import_skips_existing_and_duplicate_urls_in_source_order
         "skipped": 2,
     }
     assert manager.save_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_playlist_import_raises_when_playlist_save_fails():
+    """Catches failed persistence being reported as a successful import."""
+
+    class FailingSavePlaylistManager(FakePlaylistManager):
+        def _save_playlist(self, name, data):
+            self.save_calls += 1
+            return False
+
+    manager = FailingSavePlaylistManager(
+        {"mix": {"name": "mix", "songs": ["old"]}}
+    )
+    downloader = MagicMock()
+    downloader.get_youtube_playlist_urls = AsyncMock(return_value=["new"])
+    svc = MusicService(
+        FakeBot([G(1)]), lambda _id: FakePlayer(), downloader, manager, "1"
+    )
+
+    with pytest.raises(ServiceError) as error:
+        await svc.playlist_import_youtube(
+            "mix", "https://youtube.com/playlist?list=abc"
+        )
+
+    assert error.value.code == "SAVE_FAILED"
+    assert error.value.status == 500
+    assert manager.playlists["mix"]["songs"] == ["old"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_playlist_imports_preserve_both_distinct_results():
+    """Catches overlapping imports overwriting songs saved by a peer import."""
+
+    class CoordinatedDownloader:
+        def __init__(self):
+            self.arrived = 0
+            self.release = asyncio.Event()
+
+        async def get_youtube_playlist_urls(self, url):
+            self.arrived += 1
+            if self.arrived == 2:
+                self.release.set()
+            await self.release.wait()
+            if url.endswith("first"):
+                return ["song-one"]
+            return ["song-two"]
+
+    manager = FakePlaylistManager({"mix": {"name": "mix", "songs": []}})
+    downloader = CoordinatedDownloader()
+    svc = MusicService(
+        FakeBot([G(1)]), lambda _id: FakePlayer(), downloader, manager, "1"
+    )
+
+    await asyncio.gather(
+        svc.playlist_import_youtube("mix", "https://youtube.com/playlist?list=first"),
+        svc.playlist_import_youtube("mix", "https://youtube.com/playlist?list=second"),
+    )
+
+    assert set(manager.playlists["mix"]["songs"]) == {"song-one", "song-two"}
+    assert len(manager.playlists["mix"]["songs"]) == 2
+    assert manager.save_calls == 2
 
 
 @pytest.mark.asyncio
