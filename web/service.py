@@ -388,8 +388,12 @@ class MusicService:
         if not data:
             raise ServiceError("Not found", "NOT_FOUND", 404)
 
-        parsed = urlparse(url or "")
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        try:
+            parsed = urlparse(url or "")
+            valid_url = parsed.scheme in {"http", "https"} and parsed.hostname
+        except ValueError:
+            valid_url = False
+        if not valid_url:
             raise ServiceError("Invalid URL", "INVALID_URL", 400)
 
         try:

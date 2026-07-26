@@ -351,3 +351,53 @@ def test_flat_playlist_extractor_keeps_valid_urls_and_canonicalizes_ids(monkeypa
     assert urls == ["https://example.com/watch?v=one", "https://www.youtube.com/watch?v=two"]
     assert captured["extract_flat"] is True
     assert captured["skip_download"] is True
+
+
+@pytest.mark.asyncio
+async def test_reorder_queue_translates_invalid_player_order():
+    """Catches player validation errors escaping the service API contract."""
+    svc = MusicService(FakeBot([G(1)]), lambda _id: ReorderingPlayer(), None, None, "1")
+
+    with pytest.raises(ServiceError) as error:
+        await svc.reorder_queue(["missing"])
+
+    assert error.value.code == "INVALID_QUEUE_ORDER"
+    assert error.value.status == 400
+
+
+@pytest.mark.asyncio
+async def test_playlist_import_rejects_malformed_bracketed_host():
+    """Catches URL parser errors leaking instead of returning INVALID_URL."""
+    manager = FakePlaylistManager({"mix": {"name": "mix", "songs": []}})
+    downloader = MagicMock()
+    svc = MusicService(FakeBot([G(1)]), lambda _id: FakePlayer(), downloader, manager, "1")
+
+    with pytest.raises(ServiceError) as error:
+        await svc.playlist_import_youtube("mix", "http://[")
+
+    assert error.value.code == "INVALID_URL"
+    assert error.value.status == 400
+    downloader.get_youtube_playlist_urls.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("source_urls", "skipped"), [([], 0), (["old", "old"], 2)])
+async def test_playlist_import_empty_or_all_duplicate_source_does_not_save(
+    source_urls, skipped
+):
+    """Catches no-op imports being treated as errors or persisted unnecessarily."""
+    manager = FakePlaylistManager({"mix": {"name": "mix", "songs": ["old"]}})
+    downloader = MagicMock()
+    downloader.get_youtube_playlist_urls = AsyncMock(return_value=source_urls)
+    svc = MusicService(FakeBot([G(1)]), lambda _id: FakePlayer(), downloader, manager, "1")
+
+    result = await svc.playlist_import_youtube("mix", "https://youtube.com/playlist?list=abc")
+
+    assert result == {
+        "name": "mix",
+        "songs": ["old"],
+        "count": 1,
+        "added": 0,
+        "skipped": skipped,
+    }
+    assert manager.save_calls == 0
