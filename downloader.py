@@ -346,3 +346,37 @@ class MusicDownloader:
             filename = filename[:200]
         return filename
 
+
+    async def get_youtube_playlist_urls(self, url: str) -> list[str]:
+        """Extract playlist watch URLs without downloading media."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._get_youtube_playlist_urls_sync, url)
+
+    def _get_youtube_playlist_urls_sync(self, url: str) -> list[str]:
+        """Synchronously obtain flat playlist metadata from yt-dlp."""
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": True,
+            "skip_download": True,
+        }
+        ydl_opts.update(self._auth_options())
+        pot_args = self._pot_extractor_args()
+        if pot_args:
+            ydl_opts["extractor_args"] = pot_args
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False) or {}
+
+        urls = []
+        for entry in info.get("entries") or []:
+            if not isinstance(entry, dict):
+                continue
+            webpage_url = entry.get("webpage_url")
+            if webpage_url:
+                urls.append(str(webpage_url))
+                continue
+            video_id = entry.get("id")
+            if video_id:
+                urls.append(f"https://www.youtube.com/watch?v={video_id}")
+        return urls
