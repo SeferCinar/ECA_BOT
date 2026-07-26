@@ -1,7 +1,9 @@
 from fastapi.testclient import TestClient
+from unittest.mock import AsyncMock
+
 from web.app import create_app
 from web.auth import create_session_secret
-from web.service import MusicService
+from web.service import MusicService, ServiceError
 
 
 class G:
@@ -47,6 +49,10 @@ class FakePlayer:
             "is_playing": False,
             "is_paused": False,
         }
+    def reorder_queue(self, queue_ids):
+        if queue_ids:
+            raise ValueError("Unexpected queue IDs")
+
 
     def cleanup(self):
         pass
@@ -130,3 +136,72 @@ def test_playlist_crud_via_api(tmp_path, monkeypatch):
     r = client.delete("/api/playlists/webmix", headers=headers)
     assert r.status_code == 200
     assert r.json()["ok"] is True
+
+def test_queue_reorder_requires_auth_and_returns_snapshot():
+    bot = FakeBot()
+    app = create_app(bot=bot, full_ui=True)
+    app.state.web_token = "t"
+    app.state.session_secret = create_session_secret("s")
+    app.state.music_service = MusicService(bot, lambda gid: FakePlayer(), None, None, "1")
+    client = TestClient(app)
+
+    assert client.post("/api/queue/reorder", json={"queue_ids": []}).status_code == 401
+
+    response = client.post(
+        "/api/queue/reorder",
+        headers={"Authorization": "Bearer t"},
+        json={"queue_ids": []},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["queue"] == []
+
+
+def test_playlist_import_endpoint_returns_added_count():
+    bot = FakeBot()
+    app = create_app(bot=bot, full_ui=True)
+    app.state.web_token = "t"
+    app.state.session_secret = create_session_secret("s")
+    service = MusicService(bot, lambda gid: FakePlayer(), None, None, "1")
+    service.playlist_import_youtube = AsyncMock(
+        return_value={
+            "name": "mix",
+            "songs": ["https://youtube.com/watch?v=x"],
+            "count": 1,
+            "added": 1,
+            "skipped": 0,
+        }
+    )
+    app.state.music_service = service
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/playlists/mix/import-youtube",
+        headers={"Authorization": "Bearer t"},
+        json={"url": "https://www.youtube.com/playlist?list=x"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["added"] == 1
+
+
+def test_playlist_import_service_error_preserves_status_and_code():
+    bot = FakeBot()
+    app = create_app(bot=bot, full_ui=True)
+    app.state.web_token = "t"
+    app.state.session_secret = create_session_secret("s")
+    service = MusicService(bot, lambda gid: FakePlayer(), None, None, "1")
+    service.playlist_import_youtube = AsyncMock(
+        side_effect=ServiceError("Import failed", "IMPORT_FAILED", 502)
+    )
+    app.state.music_service = service
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/playlists/mix/import-youtube",
+        headers={"Authorization": "Bearer t"},
+        json={"url": "https://www.youtube.com/playlist?list=x"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["code"] == "IMPORT_FAILED"
