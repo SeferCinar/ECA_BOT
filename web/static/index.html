@@ -35,13 +35,13 @@
 
     <nav class="tabs" role="tablist">
       <button type="button" data-tab="player" class="tab active" role="tab">Player</button>
-      <button type="button" data-tab="queue" class="tab" role="tab">Kuyruk</button>
       <button type="button" data-tab="search" class="tab" role="tab">Ara / Çal</button>
       <button type="button" data-tab="playlists" class="tab" role="tab">Playlist</button>
       <button type="button" data-tab="library" class="tab" role="tab">Kütüphane</button>
     </nav>
 
-    <main>
+    <div class="app-layout">
+      <main class="main-content">
       <section id="tab-player" class="tab-panel" role="tabpanel">
         <div class="card">
           <h2>Ses kanalı</h2>
@@ -77,17 +77,6 @@
               <div id="player-now-meta" class="muted small">—</div>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section id="tab-queue" class="tab-panel" role="tabpanel" hidden>
-        <div class="card">
-          <div class="card-head">
-            <h2>Kuyruk</h2>
-            <span id="queue-count" class="badge">0</span>
-          </div>
-          <ul id="queue-list" class="list"></ul>
-          <p id="queue-empty" class="empty muted">Kuyruk boş</p>
         </div>
       </section>
 
@@ -128,6 +117,10 @@
             <input id="pl-song" type="text" class="grow" placeholder="Şarkı URL / dosya adı" />
             <button id="pl-add" type="button" class="btn btn-secondary">Ekle</button>
           </div>
+          <div class="row playlist-import-row">
+            <input id="pl-youtube-url" type="url" class="grow" placeholder="YouTube playlist URL" />
+            <button id="pl-youtube-import" type="button" class="btn btn-secondary">YouTube'dan içe aktar</button>
+          </div>
           <ul id="pl-songs" class="list"></ul>
           <p id="pl-songs-empty" class="empty muted">Şarkı yok</p>
         </div>
@@ -143,7 +136,17 @@
           <p id="lib-empty" class="empty muted">Dosya bulunamadı</p>
         </div>
       </section>
-    </main>
+      </main>
+
+      <aside class="queue-sidebar card" aria-label="Çalma kuyruğu">
+        <div class="card-head">
+          <h2>Kuyruk</h2>
+          <span id="queue-count" class="badge">0</span>
+        </div>
+        <ul id="queue-list" class="list queue-list"></ul>
+        <p id="queue-empty" class="empty muted">Kuyruk boş</p>
+      </aside>
+    </div>
 
     <footer class="player-bar">
       <div class="np">
