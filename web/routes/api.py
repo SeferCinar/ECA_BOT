@@ -46,6 +46,19 @@ async def queue(request: Request, guild_id: Optional[str] = None):
         handle(e)
 
 
+class QueueReorderBody(BaseModel):
+    queue_ids: list[str]
+    guild_id: Optional[str] = None
+
+
+@router.post("/queue/reorder")
+async def queue_reorder(body: QueueReorderBody, request: Request):
+    try:
+        return await svc(request).reorder_queue(body.queue_ids, body.guild_id)
+    except ServiceError as e:
+        handle(e)
+
+
 @router.post("/control/{action}")
 async def control(action: str, request: Request, guild_id: Optional[str] = None):
     try:
@@ -171,6 +184,20 @@ async def library(request: Request):
 async def library_play(body: LibraryPlayBody, request: Request):
     try:
         return await svc(request).library_play(body.name, body.guild_id)
+    except ServiceError as e:
+        handle(e)
+
+
+class YoutubeImportBody(BaseModel):
+    url: str
+
+
+@router.post("/playlists/{name}/import-youtube")
+async def playlists_import_youtube(
+    name: str, body: YoutubeImportBody, request: Request
+):
+    try:
+        return await svc(request).playlist_import_youtube(name, body.url)
     except ServiceError as e:
         handle(e)
 

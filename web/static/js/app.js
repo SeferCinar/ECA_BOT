@@ -40,6 +40,8 @@
     plDetailClose: document.getElementById("pl-detail-close"),
     plSong: document.getElementById("pl-song"),
     plAdd: document.getElementById("pl-add"),
+    plYoutubeUrl: document.getElementById("pl-youtube-url"),
+    plYoutubeImport: document.getElementById("pl-youtube-import"),
     plSongs: document.getElementById("pl-songs"),
     plSongsEmpty: document.getElementById("pl-songs-empty"),
     libList: document.getElementById("lib-list"),
@@ -65,6 +67,8 @@
   let volDebounce = null;
   let lastVolSent = null;
   let toastTimer = null;
+  let queueDragActive = false;
+  let queueDragStartOrder = "";
 
   function parseError(data, fallback) {
     if (!data) return fallback || "İstek başarısız";
@@ -292,13 +296,91 @@
       src + " · İsteyen: " + user + (now.webpage_url ? " · " + now.webpage_url : "");
   }
 
+  function queueOrderFromDom() {
+    return Array.from(el.queueList.querySelectorAll("li[data-queue-id]")).map(function (item) {
+      return item.dataset.queueId;
+    });
+  }
+
+  function updateQueueIndexes() {
+    el.queueList.querySelectorAll("li[data-queue-id]").forEach(function (item, index) {
+      const idx = item.querySelector(".idx");
+      if (idx) idx.textContent = String(index + 1);
+    });
+  }
+
+  async function submitQueueOrder() {
+    const queue_ids = queueOrderFromDom();
+    try {
+      const snapshot = await api("/api/queue/reorder", {
+        method: "POST",
+        body: JSON.stringify({ queue_ids: queue_ids }),
+      });
+      applySnapshot(snapshot);
+    } catch (err) {
+      toastError(err);
+    } finally {
+      await refreshState().catch(function (err) {
+        if (err.status === 401) {
+          showLogin();
+        } else {
+          toastError(err);
+        }
+      });
+    }
+  }
+
+  function handleQueueDragStart(event) {
+    queueDragActive = true;
+    queueDragStartOrder = JSON.stringify(queueOrderFromDom());
+    event.currentTarget.classList.add("dragging");
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", event.currentTarget.dataset.queueId);
+    }
+  }
+
+  function handleQueueDragEnd(event) {
+    event.currentTarget.classList.remove("dragging");
+    const changed = queueDragStartOrder !== JSON.stringify(queueOrderFromDom());
+    queueDragActive = false;
+    queueDragStartOrder = "";
+    updateQueueIndexes();
+    if (changed) {
+      submitQueueOrder();
+    } else {
+      refreshState().catch(toastError);
+    }
+  }
+
+  el.queueList.addEventListener("dragover", function (event) {
+    if (!queueDragActive) return;
+    event.preventDefault();
+    const dragged = el.queueList.querySelector("li.dragging");
+    const target = event.target.closest("li[data-queue-id]");
+    if (!dragged || !target || target === dragged) return;
+    const bounds = target.getBoundingClientRect();
+    const afterTarget = event.clientY > bounds.top + bounds.height / 2;
+    el.queueList.insertBefore(dragged, afterTarget ? target.nextSibling : target);
+    updateQueueIndexes();
+  });
+
+  el.queueList.addEventListener("drop", function (event) {
+    if (queueDragActive) event.preventDefault();
+  });
+
   function applyQueue(queue) {
+    if (queueDragActive) return;
     const items = Array.isArray(queue) ? queue : [];
     el.queueList.innerHTML = "";
     el.queueCount.textContent = String(items.length);
     el.queueEmpty.hidden = items.length > 0;
     items.forEach(function (song, i) {
       const li = document.createElement("li");
+      li.draggable = true;
+      li.dataset.queueId = String(song.queue_id);
+      li.addEventListener("dragstart", handleQueueDragStart);
+      li.addEventListener("dragend", handleQueueDragEnd);
       const src = song.is_stream ? "🌐" : "📁";
       li.innerHTML =
         '<span class="idx">' +
@@ -321,8 +403,12 @@
   function applySnapshot(snap) {
     if (!snap || snap.error) return;
     if (snap.status) applyStatus(snap.status);
-    applyNow(snap.now);
-    applyQueue(snap.queue);
+    if (snap.now !== undefined) {
+      applyNow(snap.now);
+    } else if (snap.current !== undefined) {
+      applyNow(snap.current);
+    }
+    if (snap.queue !== undefined) applyQueue(snap.queue);
   }
 
   async function refreshState() {
@@ -665,12 +751,14 @@
     el.plDetail.hidden = false;
     el.plDetailTitle.textContent = name;
     renderPlaylistSongs(songs || []);
+    el.plYoutubeUrl.value = "";
   }
 
   function closePlaylistDetail() {
     selectedPlaylist = null;
     el.plDetail.hidden = true;
     el.plSongs.innerHTML = "";
+    el.plYoutubeUrl.value = "";
   }
 
   function renderPlaylistSongs(songs) {
@@ -747,6 +835,39 @@
     } catch (err) {
       toastError(err);
     }
+  });
+
+  async function importYoutubePlaylist() {
+    const url = (el.plYoutubeUrl.value || "").trim();
+    if (!selectedPlaylist || !url) {
+      showToast("YouTube playlist URL girin", false);
+      return;
+    }
+    try {
+      el.plYoutubeImport.disabled = true;
+      const data = await api(
+        "/api/playlists/" + encodeURIComponent(selectedPlaylist) + "/import-youtube",
+        {
+          method: "POST",
+          body: JSON.stringify({ url: url }),
+        }
+      );
+      el.plYoutubeUrl.value = "";
+      renderPlaylistSongs((data && data.songs) || []);
+      await loadPlaylists();
+      const added = data && data.added != null ? data.added : 0;
+      const skipped = data && data.skipped != null ? data.skipped : 0;
+      showToast(String(added) + " eklendi, " + String(skipped) + " atlandı", true);
+    } catch (err) {
+      toastError(err);
+    } finally {
+      el.plYoutubeImport.disabled = false;
+    }
+  }
+
+  el.plYoutubeImport.addEventListener("click", importYoutubePlaylist);
+  el.plYoutubeUrl.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") importYoutubePlaylist();
   });
 
   el.plDetailClose.addEventListener("click", closePlaylistDetail);

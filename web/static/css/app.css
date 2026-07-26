@@ -269,12 +269,32 @@ h2 {
   font-weight: 600;
 }
 
-main {
+.app-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 24rem);
+  align-items: start;
+  gap: 1rem;
+  flex: 1;
   padding: 1rem;
-  max-width: 920px;
+  max-width: 1320px;
   width: 100%;
   margin: 0 auto;
-  flex: 1;
+}
+
+.main-content {
+  min-width: 0;
+}
+
+.queue-sidebar {
+  position: sticky;
+  top: calc(var(--topbar-h) + var(--tabs-h) + 1rem);
+  max-height: calc(100vh - var(--topbar-h) - var(--tabs-h) - var(--player-h) - 2rem);
+  min-width: 0;
+  overflow: auto;
+}
+
+.playlist-import-row {
+  margin-top: 0.65rem;
 }
 
 /* —— Cards / forms —— */
@@ -308,6 +328,7 @@ main {
 }
 
 input[type="text"],
+input[type="url"],
 input[type="password"],
 input[type="search"],
 select {
@@ -486,6 +507,20 @@ select:focus {
 
 .list li:last-child {
   border-bottom: 0;
+}
+
+.queue-list > li[draggable="true"] {
+  cursor: grab;
+  user-select: none;
+}
+
+.queue-list > li[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.queue-list > li.dragging {
+  opacity: 0.45;
+  background: var(--card-hover);
 }
 
 .list li:hover {
@@ -680,6 +715,17 @@ select:focus {
 }
 
 /* —— Responsive —— */
+@media (max-width: 959px) {
+  .app-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .queue-sidebar {
+    position: static;
+    max-height: none;
+  }
+}
+
 @media (max-width: 720px) {
   .player-bar {
     grid-template-columns: 1fr;
@@ -748,7 +794,7 @@ select:focus {
     height: 40px;
   }
 
-  main {
+  .app-layout {
     padding: 0.75rem;
   }
 }

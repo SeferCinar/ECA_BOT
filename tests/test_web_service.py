@@ -1,3 +1,4 @@
+import asyncio
 import os
 from unittest.mock import MagicMock, AsyncMock
 
@@ -189,3 +190,277 @@ async def test_play_local_enqueue_failure_raises(tmp_path, monkeypatch):
     with pytest.raises(ServiceError) as ei:
         await svc.play("ok.mp3")
     assert ei.value.code == "NOT_FOUND"
+
+
+class ReorderingPlayer(FakePlayer):
+    def __init__(self):
+        super().__init__()
+        self.queue = [
+            {"queue_id": "first", "name": "First"},
+            {"queue_id": "second", "name": "Second"},
+        ]
+
+    def snapshot(self):
+        return {
+            "current": None,
+            "queue": list(self.queue),
+            "volume": 50,
+            "is_playing": False,
+            "is_paused": False,
+        }
+
+    def reorder_queue(self, queue_ids):
+        entries = {entry["queue_id"]: entry for entry in self.queue}
+        if set(queue_ids) != set(entries) or len(queue_ids) != len(entries):
+            raise ValueError("invalid queue order")
+        self.queue = [entries[queue_id] for queue_id in queue_ids]
+
+
+class FakePlaylistManager:
+    def __init__(self, playlists):
+        self.playlists = playlists
+        self.save_calls = 0
+
+    def _load_playlist(self, name):
+        data = self.playlists.get(name)
+        if data is None:
+            return None
+        return {**data, "songs": list(data.get("songs") or [])}
+
+    def _save_playlist(self, name, data):
+        self.save_calls += 1
+        self.playlists[name] = {**data, "songs": list(data.get("songs") or [])}
+        return True
+
+
+@pytest.mark.asyncio
+async def test_reorder_queue_returns_reversed_snapshot_ids():
+    """Catches a reorder operation that does not return the updated queue."""
+    g = G(1)
+    player = ReorderingPlayer()
+    svc = MusicService(FakeBot([g]), lambda _id: player, None, None, "1")
+
+    result = await svc.reorder_queue(["second", "first"])
+
+    assert [entry["queue_id"] for entry in result["queue"]] == ["second", "first"]
+
+
+@pytest.mark.asyncio
+async def test_playlist_import_skips_existing_and_duplicate_urls_in_source_order():
+    """Catches imports that save duplicate URLs or reorder source entries."""
+    manager = FakePlaylistManager({"mix": {"name": "mix", "songs": ["old"]}})
+    downloader = MagicMock()
+    downloader.get_youtube_playlist_urls = AsyncMock(
+        return_value=["old", "new", "new", "other"]
+    )
+    svc = MusicService(FakeBot([G(1)]), lambda _id: FakePlayer(), downloader, manager, "1")
+
+    result = await svc.playlist_import_youtube("mix", "https://youtube.com/playlist?list=abc")
+
+    assert result == {
+        "name": "mix",
+        "songs": ["old", "new", "other"],
+        "count": 3,
+        "added": 2,
+        "skipped": 2,
+    }
+    assert manager.save_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_playlist_import_raises_when_playlist_save_fails():
+    """Catches failed persistence being reported as a successful import."""
+
+    class FailingSavePlaylistManager(FakePlaylistManager):
+        def _save_playlist(self, name, data):
+            self.save_calls += 1
+            return False
+
+    manager = FailingSavePlaylistManager(
+        {"mix": {"name": "mix", "songs": ["old"]}}
+    )
+    downloader = MagicMock()
+    downloader.get_youtube_playlist_urls = AsyncMock(return_value=["new"])
+    svc = MusicService(
+        FakeBot([G(1)]), lambda _id: FakePlayer(), downloader, manager, "1"
+    )
+
+    with pytest.raises(ServiceError) as error:
+        await svc.playlist_import_youtube(
+            "mix", "https://youtube.com/playlist?list=abc"
+        )
+
+    assert error.value.code == "SAVE_FAILED"
+    assert error.value.status == 500
+    assert manager.playlists["mix"]["songs"] == ["old"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_playlist_imports_preserve_both_distinct_results():
+    """Catches overlapping imports overwriting songs saved by a peer import."""
+
+    class CoordinatedDownloader:
+        def __init__(self):
+            self.arrived = 0
+            self.release = asyncio.Event()
+
+        async def get_youtube_playlist_urls(self, url):
+            self.arrived += 1
+            if self.arrived == 2:
+                self.release.set()
+            await self.release.wait()
+            if url.endswith("first"):
+                return ["song-one"]
+            return ["song-two"]
+
+    manager = FakePlaylistManager({"mix": {"name": "mix", "songs": []}})
+    downloader = CoordinatedDownloader()
+    svc = MusicService(
+        FakeBot([G(1)]), lambda _id: FakePlayer(), downloader, manager, "1"
+    )
+
+    await asyncio.gather(
+        svc.playlist_import_youtube("mix", "https://youtube.com/playlist?list=first"),
+        svc.playlist_import_youtube("mix", "https://youtube.com/playlist?list=second"),
+    )
+
+    assert set(manager.playlists["mix"]["songs"]) == {"song-one", "song-two"}
+    assert len(manager.playlists["mix"]["songs"]) == 2
+    assert manager.save_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_playlist_import_rejects_non_http_urls_before_extraction():
+    """Catches unsafe URL schemes reaching the metadata extractor."""
+    manager = FakePlaylistManager({"mix": {"name": "mix", "songs": []}})
+    downloader = MagicMock()
+    svc = MusicService(FakeBot([G(1)]), lambda _id: FakePlayer(), downloader, manager, "1")
+
+    with pytest.raises(ServiceError) as error:
+        await svc.playlist_import_youtube("mix", "file:///private/list.txt")
+
+    assert error.value.code == "INVALID_URL"
+    assert error.value.status == 400
+    downloader.get_youtube_playlist_urls.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_playlist_import_translates_extraction_failure():
+    """Catches downloader errors leaking as unstructured server failures."""
+    manager = FakePlaylistManager({"mix": {"name": "mix", "songs": []}})
+    downloader = MagicMock()
+    downloader.get_youtube_playlist_urls = AsyncMock(side_effect=RuntimeError("yt-dlp failed"))
+    svc = MusicService(FakeBot([G(1)]), lambda _id: FakePlayer(), downloader, manager, "1")
+
+    with pytest.raises(ServiceError) as error:
+        await svc.playlist_import_youtube("mix", "https://youtube.com/playlist?list=abc")
+
+    assert error.value.code == "IMPORT_FAILED"
+    assert error.value.status == 502
+
+
+@pytest.mark.asyncio
+async def test_playlist_import_requires_existing_playlist():
+    """Catches an import that creates or mutates a missing playlist."""
+    downloader = MagicMock()
+    svc = MusicService(
+        FakeBot([G(1)]), lambda _id: FakePlayer(), downloader, FakePlaylistManager({}), "1"
+    )
+
+    with pytest.raises(ServiceError) as error:
+        await svc.playlist_import_youtube("missing", "https://youtube.com/playlist?list=abc")
+
+    assert error.value.code == "NOT_FOUND"
+    assert error.value.status == 404
+
+
+def test_flat_playlist_extractor_keeps_valid_urls_and_canonicalizes_ids(monkeypatch):
+    """Catches metadata extraction that downloads tracks or drops ID-only entries."""
+    captured = {}
+
+    class FakeYDL:
+        def __init__(self, options):
+            captured.update(options)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, download):
+            assert download is False
+            return {
+                "entries": [
+                    {"webpage_url": "https://example.com/watch?v=one"},
+                    {"id": "two"},
+                    {"title": "no URL or id"},
+                    None,
+                ]
+            }
+
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(sys.modules, "yt_dlp", SimpleNamespace(YoutubeDL=FakeYDL))
+    import downloader as downloader_module
+
+    monkeypatch.setattr(downloader_module.yt_dlp, "YoutubeDL", FakeYDL)
+    instance = downloader_module.MusicDownloader.__new__(downloader_module.MusicDownloader)
+    instance.cookie_file = None
+
+    urls = instance._get_youtube_playlist_urls_sync("https://youtube.com/playlist?list=abc")
+
+    assert urls == ["https://example.com/watch?v=one", "https://www.youtube.com/watch?v=two"]
+    assert captured["extract_flat"] is True
+    assert captured["skip_download"] is True
+
+
+@pytest.mark.asyncio
+async def test_reorder_queue_translates_invalid_player_order():
+    """Catches player validation errors escaping the service API contract."""
+    svc = MusicService(FakeBot([G(1)]), lambda _id: ReorderingPlayer(), None, None, "1")
+
+    with pytest.raises(ServiceError) as error:
+        await svc.reorder_queue(["missing"])
+
+    assert error.value.code == "INVALID_QUEUE_ORDER"
+    assert error.value.status == 400
+
+
+@pytest.mark.asyncio
+async def test_playlist_import_rejects_malformed_bracketed_host():
+    """Catches URL parser errors leaking instead of returning INVALID_URL."""
+    manager = FakePlaylistManager({"mix": {"name": "mix", "songs": []}})
+    downloader = MagicMock()
+    svc = MusicService(FakeBot([G(1)]), lambda _id: FakePlayer(), downloader, manager, "1")
+
+    with pytest.raises(ServiceError) as error:
+        await svc.playlist_import_youtube("mix", "http://[")
+
+    assert error.value.code == "INVALID_URL"
+    assert error.value.status == 400
+    downloader.get_youtube_playlist_urls.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("source_urls", "skipped"), [([], 0), (["old", "old"], 2)])
+async def test_playlist_import_empty_or_all_duplicate_source_does_not_save(
+    source_urls, skipped
+):
+    """Catches no-op imports being treated as errors or persisted unnecessarily."""
+    manager = FakePlaylistManager({"mix": {"name": "mix", "songs": ["old"]}})
+    downloader = MagicMock()
+    downloader.get_youtube_playlist_urls = AsyncMock(return_value=source_urls)
+    svc = MusicService(FakeBot([G(1)]), lambda _id: FakePlayer(), downloader, manager, "1")
+
+    result = await svc.playlist_import_youtube("mix", "https://youtube.com/playlist?list=abc")
+
+    assert result == {
+        "name": "mix",
+        "songs": ["old"],
+        "count": 1,
+        "added": 0,
+        "skipped": skipped,
+    }
+    assert manager.save_calls == 0

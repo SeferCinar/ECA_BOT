@@ -370,3 +370,61 @@ class MusicService:
         for song in songs:
             last = await self.play(song, download=False, guild_id=guild_id)
         return last or self.state_snapshot(guild_id)
+
+    async def reorder_queue(
+        self, queue_ids: list[str], guild_id: Optional[str] = None
+    ) -> dict:
+        player, _ = self._player(guild_id)
+        try:
+            player.reorder_queue(queue_ids)
+        except ValueError as error:
+            raise ServiceError(str(error), "INVALID_QUEUE_ORDER", 400)
+        return player.snapshot()
+
+    async def playlist_import_youtube(self, name: str, url: str) -> dict:
+        from urllib.parse import urlparse
+
+        data = self.playlist_manager._load_playlist(name)
+        if not data:
+            raise ServiceError("Not found", "NOT_FOUND", 404)
+
+        try:
+            parsed = urlparse(url or "")
+            valid_url = parsed.scheme in {"http", "https"} and parsed.hostname
+        except ValueError:
+            valid_url = False
+        if not valid_url:
+            raise ServiceError("Invalid URL", "INVALID_URL", 400)
+
+        try:
+            source_urls = await self.downloader.get_youtube_playlist_urls(url)
+        except Exception as error:
+            raise ServiceError(str(error), "IMPORT_FAILED", 502)
+
+        data = self.playlist_manager._load_playlist(name)
+        if not data:
+            raise ServiceError("Not found", "NOT_FOUND", 404)
+
+        songs = list(data.get("songs") or [])
+        seen = set(songs)
+        added = 0
+        skipped = 0
+        for song in source_urls or []:
+            if song in seen:
+                skipped += 1
+                continue
+            songs.append(song)
+            seen.add(song)
+            added += 1
+
+        data["songs"] = songs
+        if added:
+            if not self.playlist_manager._save_playlist(name, data):
+                raise ServiceError("Save failed", "SAVE_FAILED", 500)
+        return {
+            "name": data.get("name", name),
+            "songs": songs,
+            "count": len(songs),
+            "added": added,
+            "skipped": skipped,
+        }
