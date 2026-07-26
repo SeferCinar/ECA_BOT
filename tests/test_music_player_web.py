@@ -65,6 +65,91 @@ def test_snapshot_with_queue():
     assert snap["volume"] == 75
 
 
+def test_snapshot_queue_ids_distinguish_identical_queued_songs():
+    """Queued duplicates need independently addressable IDs for web controls."""
+    p = MusicPlayer(FakeBot())
+    user = WebUser()
+    for _ in range(2):
+        p.queue.append({
+            "file": "/tmp/duplicate.mp3",
+            "name": "duplicate.mp3",
+            "user": user,
+            "is_stream": False,
+        })
+
+    queue_ids = [song["queue_id"] for song in p.snapshot()["queue"]]
+
+    assert all(queue_ids)
+    assert len(set(queue_ids)) == 2
+
+
+def test_reorder_queue_reverses_pending_without_changing_current_song():
+    """Reorder must apply solely to pending tracks, never the active track."""
+    p = MusicPlayer(FakeBot())
+    user = WebUser()
+    p.current = {"name": "Current", "user": user, "is_stream": False}
+    p.queue.extend([
+        {"name": "First", "user": user, "is_stream": False},
+        {"name": "Second", "user": user, "is_stream": False},
+    ])
+    original_current = p.current
+    original_ids = [song["queue_id"] for song in p.snapshot()["queue"]]
+
+    p.reorder_queue(list(reversed(original_ids)))
+
+    assert p.current is original_current
+    assert [song["name"] for song in p.snapshot()["queue"]] == ["Second", "First"]
+
+
+def test_reorder_queue_invalid_ids_leave_pending_order_intact():
+    """Invalid orders must be rejected before they mutate the pending queue."""
+    p = MusicPlayer(FakeBot())
+    user = WebUser()
+    p.queue.extend([
+        {"name": "First", "user": user, "is_stream": False},
+        {"name": "Second", "user": user, "is_stream": False},
+    ])
+    original_names = [song["name"] for song in p.queue]
+    queue_ids = [song["queue_id"] for song in p.snapshot()["queue"]]
+    invalid_orders = [
+        ["stale-id", queue_ids[1]],
+        [queue_ids[0], queue_ids[0]],
+        [queue_ids[0]],
+    ]
+
+    for invalid_order in invalid_orders:
+        with pytest.raises(ValueError, match="^invalid queue order$"):
+            p.reorder_queue(invalid_order)
+        assert [song["name"] for song in p.queue] == original_names
+
+
+@pytest.mark.asyncio
+async def test_add_to_queue_assigns_queue_ids(monkeypatch):
+    p = MusicPlayer(FakeBot())
+    p.is_playing = True
+    monkeypatch.setattr("music.os.path.exists", lambda _path: True)
+
+    added = await p.add_to_queue(None, "/tmp/song.mp3", WebUser())
+
+    assert added is True
+    assert p.queue[0]["queue_id"]
+
+
+@pytest.mark.asyncio
+async def test_add_stream_to_queue_assigns_queue_ids():
+    p = MusicPlayer(FakeBot())
+    p.is_playing = True
+
+    added = await p.add_stream_to_queue(
+        None,
+        {"url": "https://example.com/stream", "title": "Stream"},
+        WebUser(),
+    )
+
+    assert added is True
+    assert p.queue[0]["queue_id"]
+
+
 def test_set_voice_client():
     p = MusicPlayer(FakeBot())
     vc = MagicMock()

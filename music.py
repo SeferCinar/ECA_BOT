@@ -3,6 +3,7 @@ from discord.ext import commands
 import asyncio
 from collections import deque
 import os
+from uuid import uuid4
 
 
 class WebUser:
@@ -52,22 +53,36 @@ class MusicPlayer:
         else:
             return await interaction.send(message)
 
+    def _ensure_queue_id(self, song):
+        song.setdefault("queue_id", uuid4().hex)
+        return song["queue_id"]
+
+    def reorder_queue(self, queue_ids: list[str]) -> None:
+        current = list(self.queue)
+        by_id = {self._ensure_queue_id(song): song for song in current}
+        if len(by_id) != len(current) or len(queue_ids) != len(current) or set(queue_ids) != set(by_id):
+            raise ValueError("invalid queue order")
+        self.queue = deque(by_id[queue_id] for queue_id in queue_ids)
+
     def snapshot(self):
         """JSON-serializable player state for web UI / API."""
-        def song_dict(s):
+        def song_dict(s, include_queue_id=False):
             if not s:
                 return None
             user = s.get("user")
             user_label = getattr(user, "name", None) or getattr(user, "mention", None) or str(user)
-            return {
+            result = {
                 "name": s.get("name"),
                 "is_stream": bool(s.get("is_stream", False)),
                 "user": user_label,
                 "webpage_url": s.get("webpage_url") or "",
             }
+            if include_queue_id:
+                result["queue_id"] = self._ensure_queue_id(s)
+            return result
         return {
             "current": song_dict(self.current),
-            "queue": [song_dict(s) for s in list(self.queue)],
+            "queue": [song_dict(s, include_queue_id=True) for s in list(self.queue)],
             "volume": self.get_volume(),
             "is_playing": self.is_playing,
             "is_paused": self.is_paused,
@@ -80,12 +95,14 @@ class MusicPlayer:
             return False
         
         song_name = os.path.basename(file_path)
-        self.queue.append({
+        song = {
             'file': file_path,
             'name': song_name,
             'user': user,
-            'is_stream': False
-        })
+            'is_stream': False,
+        }
+        self._ensure_queue_id(song)
+        self.queue.append(song)
         
         await self._send_message(interaction, f"✅ **{song_name}** kuyruğa eklendi!")
         
@@ -95,13 +112,15 @@ class MusicPlayer:
     
     async def add_stream_to_queue(self, interaction, stream_info, user):
         """Kuyruğa stream ekle (indirmeden). Returns True on success."""
-        self.queue.append({
+        song = {
             'stream_url': stream_info['url'],
             'name': stream_info['title'],
             'user': user,
             'is_stream': True,
-            'webpage_url': stream_info.get('webpage_url', '')
-        })
+            'webpage_url': stream_info.get('webpage_url', ''),
+        }
+        self._ensure_queue_id(song)
+        self.queue.append(song)
         
         await self._send_message(interaction, f"✅ **{stream_info['title']}** kuyruğa eklendi! (🌐 Stream)")
         
