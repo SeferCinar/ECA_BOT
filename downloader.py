@@ -380,3 +380,45 @@ class MusicDownloader:
             if video_id:
                 urls.append(f"https://www.youtube.com/watch?v={video_id}")
         return urls
+
+    async def get_related_videos(self, video_id: str, limit: int = 25) -> list[dict]:
+        """YouTube Music radyosundan benzer şarkılar ({id, title}), indirmeden."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._get_related_videos_sync, video_id, limit)
+
+    def _get_related_videos_sync(self, video_id: str, limit: int) -> list[dict]:
+        # RDAMVM<id>: YouTube Music'in o şarkıdan başlattığı radyo. Ara sıra boş dönüyor;
+        # o zaman normal YouTube Mix'ine (RD<id>) düş.
+        for url in (
+            f"https://music.youtube.com/watch?v={video_id}&list=RDAMVM{video_id}",
+            f"https://www.youtube.com/watch?v={video_id}&list=RD{video_id}",
+        ):
+            related = self._get_mix_entries_sync(url, video_id, limit)
+            if related:
+                return related
+        return []
+
+    def _get_mix_entries_sync(self, url: str, video_id: str, limit: int) -> list[dict]:
+        # playlistend olmadan yt-dlp yüzlerce girdiyi sayfalayıp ~20 sn bekletiyor
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": True,
+            "skip_download": True,
+            "playlistend": limit + 1,
+            "lazy_playlist": True,
+        }
+        ydl_opts.update(self._auth_options())
+        pot_args = self._pot_extractor_args()
+        if pot_args:
+            ydl_opts["extractor_args"] = pot_args
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False) or {}
+
+        related = []
+        for entry in info.get("entries") or []:
+            if not isinstance(entry, dict) or not entry.get("id") or entry["id"] == video_id:
+                continue
+            related.append({"id": entry["id"], "title": entry.get("title") or ""})
+        return related[:limit]

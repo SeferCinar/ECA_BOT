@@ -230,3 +230,54 @@ def test_queue_remove_requires_auth_and_maps_missing_to_404():
     response = client.delete("/api/queue/abc", headers={"Authorization": "Bearer t"})
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "NOT_IN_QUEUE"
+
+
+def test_autoplay_endpoint_toggles_player():
+    bot = FakeBot()
+    player = FakePlayer()
+    player.autoplay = False
+    player.set_autoplay = lambda enabled: setattr(player, "autoplay", enabled)
+    app = create_app(bot=bot, full_ui=True)
+    app.state.web_token = "t"
+    app.state.session_secret = create_session_secret("s")
+    app.state.music_service = MusicService(bot, lambda gid: player, None, None, "1")
+    client = TestClient(app)
+
+    assert client.post("/api/autoplay", json={"enabled": True}).status_code == 401
+
+    response = client.post("/api/autoplay", headers={"Authorization": "Bearer t"}, json={"enabled": True})
+
+    assert response.status_code == 200
+    assert response.json()["status"]["autoplay"] is True
+
+
+def test_play_passes_requested_by_label():
+    bot = FakeBot()
+    app = create_app(bot=bot, full_ui=True)
+    app.state.web_token = "t"
+    app.state.session_secret = create_session_secret("s")
+    service = MusicService(bot, lambda gid: FakePlayer(), None, None, "1")
+    service.play = AsyncMock(return_value={"queue": []})
+    app.state.music_service = service
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/play",
+        headers={"Authorization": "Bearer t"},
+        json={"query": "https://music.youtube.com/watch?v=dQw4w9WgXcQ", "requested_by": "YTMDesktop"},
+    )
+
+    assert response.status_code == 200
+    service.play.assert_awaited_once_with(
+        "https://music.youtube.com/watch?v=dQw4w9WgXcQ", False, None, requested_by="YTMDesktop"
+    )
+
+
+def test_static_files_require_revalidation():
+    app = create_app(bot=FakeBot(), full_ui=True)
+    client = TestClient(app)
+
+    response = client.get("/js/app.js")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"

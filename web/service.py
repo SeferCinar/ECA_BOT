@@ -75,6 +75,7 @@ class MusicService:
             "volume": player.get_volume(),
             "is_playing": player.is_playing,
             "is_paused": player.is_paused,
+            "autoplay": bool(getattr(player, "autoplay", False)),
         }
 
     def get_now(self, guild_id: Optional[str] = None):
@@ -125,6 +126,11 @@ class MusicService:
         player, _ = self._player(guild_id)
         await player.set_volume(None, vol / 100.0)
         return {"volume": player.get_volume()}
+
+    async def set_autoplay(self, enabled: bool, guild_id: Optional[str] = None) -> dict:
+        player, _ = self._player(guild_id)
+        player.set_autoplay(enabled)
+        return self.state_snapshot(guild_id)
 
     def list_voice_channels(self, guild_id: Optional[str] = None) -> list:
         g = self._guild(guild_id)
@@ -193,12 +199,18 @@ class MusicService:
             raise ServiceError("File not found; use search for YouTube", "NOT_FOUND", 404)
         return resolved
 
-    async def play(self, query: str, download: bool = False, guild_id: Optional[str] = None) -> dict:
+    async def play(
+        self,
+        query: str,
+        download: bool = False,
+        guild_id: Optional[str] = None,
+        requested_by: Optional[str] = None,
+    ) -> dict:
         player, g = self._player(guild_id)
         if g.voice_client is None:
             raise ServiceError("Join a voice channel first", "VOICE_NOT_CONNECTED", 409)
         player.set_voice_client(g.voice_client)
-        user = WebUser()
+        user = WebUser(requested_by) if requested_by else WebUser()
         q = (query or "").strip()
         if not q:
             raise ServiceError("query required", "INVALID_QUERY", 400)

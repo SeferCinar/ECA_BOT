@@ -26,7 +26,7 @@ playlist_manager = PlaylistManager()
 def get_music_player(guild_id):
     """Guild için müzik player'ı al veya oluştur"""
     if guild_id not in music_players:
-        music_players[guild_id] = MusicPlayer(bot)
+        music_players[guild_id] = MusicPlayer(bot, downloader)
     return music_players[guild_id]
 
 # ========== BOŞ KANALDAN OTOMATİK AYRILMA ==========
@@ -396,6 +396,22 @@ async def remove_from_queue(interaction: discord.Interaction, position: int):
     player = get_music_player(interaction.guild.id)
     await player.remove_at(interaction, position)
 
+@tree.command(name='autoplay', description='Kuyruk bitince benzer şarkılarla devam et (aç/kapat)')
+@app_commands.describe(state='Aç ya da kapat (boş bırakırsan mevcut durumu tersine çevirir)')
+@app_commands.choices(state=[
+    app_commands.Choice(name='aç', value='on'),
+    app_commands.Choice(name='kapat', value='off'),
+])
+async def autoplay(interaction: discord.Interaction, state: Optional[app_commands.Choice[str]] = None):
+    """Autoplay aç/kapat"""
+    player = get_music_player(interaction.guild.id)
+    enabled = (not player.autoplay) if state is None else state.value == 'on'
+    player.set_autoplay(enabled)
+    if enabled:
+        await interaction.response.send_message("📻 Autoplay açık! Kuyruk bitince son çalan şarkıya benzer şarkılarla devam edeceğim.")
+    else:
+        await interaction.response.send_message("📻 Autoplay kapalı.")
+
 @tree.command(name='shuffle', description='Kuyruğu karıştır')
 async def shuffle_queue(interaction: discord.Interaction):
     """Kuyruğu karıştır"""
@@ -439,7 +455,8 @@ async def help_command(interaction: discord.Interaction):
             "`/volume [vol:<0-100>]` - Ses seviyesini ayarla\n"
             "`/remove position:<sıra>` - Kuyruktan şarkı kaldır\n"
             "`/clear` - Kuyruğu temizle\n"
-            "`/shuffle` - Kuyruğu karıştır"
+            "`/shuffle` - Kuyruğu karıştır\n"
+            "`/autoplay [state:aç/kapat]` - Kuyruk bitince benzer şarkılarla devam et"
         ),
         inline=False
     )

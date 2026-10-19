@@ -55,6 +55,7 @@
     btnStop: document.getElementById("btn-stop"),
     btnShuffle: document.getElementById("btn-shuffle"),
     btnClear: document.getElementById("btn-clear"),
+    btnAutoplay: document.getElementById("btn-autoplay"),
     vol: document.getElementById("vol"),
     volLabel: document.getElementById("vol-label"),
     toast: document.getElementById("toast"),
@@ -277,6 +278,7 @@
     const paused = !!status.is_paused;
     el.btnPause.disabled = !playing || paused;
     el.btnResume.disabled = !paused;
+    el.btnAutoplay.setAttribute("aria-pressed", status.autoplay ? "true" : "false");
   }
 
   function applyNow(now) {
@@ -614,6 +616,23 @@
   el.btnStop.addEventListener("click", function () { control("stop"); });
   el.btnShuffle.addEventListener("click", function () { control("shuffle"); });
   el.btnClear.addEventListener("click", function () { control("clear"); });
+  el.btnAutoplay.addEventListener("click", async function () {
+    const enabled = el.btnAutoplay.getAttribute("aria-pressed") !== "true";
+    try {
+      const snap = await api("/api/autoplay", {
+        method: "POST",
+        body: JSON.stringify({ enabled: enabled }),
+      });
+      applySnapshot(snap);
+      showToast(enabled ? "Autoplay açık" : "Autoplay kapalı", true);
+    } catch (err) {
+      if (err.status === 401) {
+        showLogin();
+      } else {
+        toastError(err);
+      }
+    }
+  });
 
   function sendVolume(vol) {
     api("/api/volume", {

@@ -11,6 +11,15 @@ from pydantic import BaseModel
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
+class RevalidatingStaticFiles(StaticFiles):
+    """Static files that browsers must revalidate (ETag) so deploys show up without a hard refresh."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 class LoginBody(BaseModel):
     token: str
 
@@ -76,7 +85,7 @@ def create_app(*, bot: Any = None, full_ui: bool = False) -> FastAPI:
         app.include_router(ws_router)
         # auth login routes already registered without require_auth
         if STATIC_DIR.is_dir():
-            app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+            app.mount("/", RevalidatingStaticFiles(directory=str(STATIC_DIR), html=True), name="static")
 
     return app
 

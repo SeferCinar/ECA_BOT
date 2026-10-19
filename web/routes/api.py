@@ -88,6 +88,19 @@ async def volume(body: VolumeBody, request: Request):
         handle(e)
 
 
+class AutoplayBody(BaseModel):
+    enabled: bool
+    guild_id: Optional[str] = None
+
+
+@router.post("/autoplay")
+async def autoplay(body: AutoplayBody, request: Request):
+    try:
+        return await svc(request).set_autoplay(body.enabled, body.guild_id)
+    except ServiceError as e:
+        handle(e)
+
+
 @router.get("/channels")
 async def channels(request: Request, guild_id: Optional[str] = None):
     try:
@@ -121,6 +134,8 @@ class PlayBody(BaseModel):
     query: str
     download: bool = False
     guild_id: Optional[str] = None
+    # Kuyrukta "İsteyen" olarak görünür (ör. YTMDesktop yardımcı programı)
+    requested_by: Optional[str] = Field(default=None, min_length=1, max_length=32)
 
 
 class SearchBody(BaseModel):
@@ -149,7 +164,9 @@ class LibraryPlayBody(BaseModel):
 @router.post("/play")
 async def play(body: PlayBody, request: Request):
     try:
-        return await svc(request).play(body.query, body.download, body.guild_id)
+        return await svc(request).play(
+            body.query, body.download, body.guild_id, requested_by=body.requested_by
+        )
     except ServiceError as e:
         handle(e)
 

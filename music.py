@@ -3,7 +3,18 @@ from discord.ext import commands
 import asyncio
 from collections import deque
 import os
+import re
 from uuid import uuid4
+
+_VIDEO_ID_RE = re.compile(
+    r"(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|embed/)|youtu\.be/)([A-Za-z0-9_-]{11})"
+)
+
+
+def video_id_from_url(url):
+    """YouTube / YouTube Music linkinden video ID'si (bulunamazsa None)."""
+    match = _VIDEO_ID_RE.search(url or "")
+    return match.group(1) if match else None
 
 
 class WebUser:
@@ -19,9 +30,16 @@ class WebUser:
         return self.name
 
 
+AUTOPLAY_USER = WebUser(name="Autoplay")
+
+
 class MusicPlayer:
-    def __init__(self, bot):
+    AUTOPLAY_HISTORY = 100  # bu kadar son çalınan şarkı autoplay'de tekrar seçilmez
+    AUTOPLAY_ATTEMPTS = 3  # stream alınamazsa denenecek aday sayısı
+
+    def __init__(self, bot, downloader=None):
         self.bot = bot
+        self.downloader = downloader
         self.queue = deque()
         self.current = None
         self.volume = 0.5
@@ -29,7 +47,12 @@ class MusicPlayer:
         self.is_paused = False
         self.voice_client = None
         self.current_user = None
-    
+        self.autoplay = False
+        self.played_ids = deque(maxlen=self.AUTOPLAY_HISTORY)
+        self._autoplay_pool = []
+        self._autoplay_pending = False
+        self._epoch = 0  # stop/cleanup/autoplay kapatma sırasında süren autoplay'i geçersiz kılar
+
     def set_voice_client(self, voice_client):
         """Store voice client for web path (no Interaction)."""
         self.voice_client = voice_client
@@ -111,6 +134,7 @@ class MusicPlayer:
             "volume": self.get_volume(),
             "is_playing": self.is_playing,
             "is_paused": self.is_paused,
+            "autoplay": self.autoplay,
         }
     
     async def add_to_queue(self, interaction, file_path, user):
@@ -157,16 +181,22 @@ class MusicPlayer:
         """Sıradaki şarkıyı çal. interaction may be None for web path."""
         if self.is_paused:
             return
-        
+
+        finished = self.current  # stop/cleanup sonrası None: o durumda autoplay devreye girmez
         if len(self.queue) == 0:
             self.is_playing = False
             self.current = None
+            if self.autoplay and finished is not None and await self._autoplay_from(finished):
+                return
             await self._send_message(interaction, "📭 Kuyruk boş!")
             return
-        
+
         song = self.queue.popleft()
         self.current = song
         self.is_playing = True
+        played_id = video_id_from_url(song.get('webpage_url'))
+        if played_id:
+            self.played_ids.append(played_id)
         
         voice_client = self._get_voice_client(interaction)
         if voice_client is None:
@@ -217,6 +247,77 @@ class MusicPlayer:
         
         await self._send_message(interaction, f"{source_type} Şimdi çalıyor: **{self.current['name']}** (İsteyen: {self.current['user'].mention})")
     
+    def set_autoplay(self, enabled):
+        """Autoplay'i aç/kapat. Kapatınca süren bir autoplay araması iptal olur."""
+        self.autoplay = bool(enabled)
+        if not self.autoplay:
+            self._epoch += 1
+            self._autoplay_pool = []
+
+    def _next_autoplay_candidate(self):
+        """Havuzdan daha önce çalınmamış ilk şarkıyı çıkar."""
+        while self._autoplay_pool:
+            candidate = self._autoplay_pool.pop(0)
+            if candidate['id'] not in self.played_ids:
+                return candidate
+        return None
+
+    async def _autoplay_from(self, finished):
+        """Kuyruk bitince benzer bir şarkı ekleyip çal.
+
+        Returns True if handled (a song was queued, or the user acted meanwhile),
+        False if nothing could be found.
+        """
+        if self.downloader is None or self._autoplay_pending:
+            return self._autoplay_pending
+        seed = video_id_from_url(finished.get('webpage_url')) or (self.played_ids[-1] if self.played_ids else None)
+        if seed is None:
+            return False
+
+        epoch = self._epoch
+        self._autoplay_pending = True
+        info = None
+        try:
+            # Kullanıcının seçtiği şarkı bittiyse onun radyosunu baştan kur; autoplay
+            # şarkıları arasında havuz bitene kadar aynı radyodan devam et.
+            if not finished.get('autoplay') or not self._autoplay_pool:
+                self._autoplay_pool = await self.downloader.get_related_videos(seed)
+            for _ in range(self.AUTOPLAY_ATTEMPTS):
+                candidate = self._next_autoplay_candidate()
+                if candidate is None:
+                    break
+                try:
+                    info = await self.downloader.get_stream_url(
+                        f"https://www.youtube.com/watch?v={candidate['id']}"
+                    )
+                except Exception as e:
+                    print(f"⚠️ Autoplay stream alınamadı ({candidate['id']}): {e}", flush=True)
+                if info:
+                    break
+        except Exception as e:
+            print(f"⚠️ Autoplay hatası: {e}", flush=True)
+        finally:
+            self._autoplay_pending = False
+
+        # Arama sürerken stop/leave/autoplay kapatma ya da yeni şarkı eklendiyse vazgeç
+        if epoch != self._epoch or not self.autoplay or self.is_playing or self.queue:
+            return True
+        if not info:
+            return False
+
+        song = {
+            'stream_url': info['url'],
+            'name': info['title'],
+            'user': AUTOPLAY_USER,
+            'is_stream': True,
+            'webpage_url': info.get('webpage_url', ''),
+            'autoplay': True,
+        }
+        self._ensure_queue_id(song)
+        self.queue.append(song)
+        await self.play_next(None)
+        return True
+
     async def skip(self, interaction):
         """Şarkıyı geç. Rely on voice after-callback to advance; only call play_next if no VC."""
         if not self.is_playing:
@@ -233,10 +334,11 @@ class MusicPlayer:
     
     async def stop(self, interaction):
         """Müziği durdur"""
-        if not self.is_playing and not self.is_paused:
+        if not self.is_playing and not self.is_paused and not self._autoplay_pending:
             await self._send_message(interaction, "❌ Şu anda hiçbir şarkı çalmıyor!")
             return
-        
+
+        self._epoch += 1  # süren autoplay aramasını iptal et
         self.queue.clear()
         if self.voice_client:
             self.voice_client.stop()
@@ -337,6 +439,7 @@ class MusicPlayer:
     
     def cleanup(self):
         """Temizlik — stop playback and clear voice client reference."""
+        self._epoch += 1  # süren autoplay aramasını iptal et
         if self.voice_client:
             self.voice_client.stop()
         self.voice_client = None

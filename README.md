@@ -15,6 +15,8 @@ Kişisel sunucunuz için geliştirilmiş Discord müzik botu. Yerel müzik dosya
 - 🔀 Kuyruk karıştırma
 - 🗑️ Kuyruktan şarkı kaldırma (Discord ve web arayüzü)
 - 💤 Ses kanalında kimse kalmazsa otomatik ayrılma (varsayılan 5 dk, `AUTO_LEAVE_SECONDS`) ve isteğe bağlı text kanalına bildirim (`AUTO_LEAVE_CHANNEL_ID`, `AUTO_LEAVE_MESSAGE`)
+- 📻 Autoplay: kuyruk bitince son şarkıya benzer şarkılarla devam (`/autoplay`, web panelindeki 📻 butonu)
+- 🖥️ YTMDesktop'tan tek tıkla şarkı gönderme (bkz. [eca-ytmd-companion](https://github.com/OmerEmreBozkurt/eca-ytmd-companion))
 - ⚡ Discord slash komutları desteği
 
 ## Kurulum
@@ -302,6 +304,7 @@ Bot artık Discord'un slash komut sistemini kullanıyor! Discord'da `/` yazdığ
 - `/remove position:<sıra>` - Kuyruktan şarkı kaldır (`/queue` listesindeki numara)
 - `/clear` - Kuyruğu temizle
 - `/shuffle` - Kuyruğu karıştır
+- `/autoplay [state:aç/kapat]` - Kuyruk bitince benzer şarkılarla devam et
 - `/help` - Tüm komutlar hakkında bilgi göster
 - `/sync` - Slash komutlarını yeniden senkronize et (komutlar görünmüyorsa kullanın)
 

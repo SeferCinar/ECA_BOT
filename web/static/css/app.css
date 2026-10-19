@@ -489,6 +489,14 @@ select:focus {
   background: var(--green-hover);
 }
 
+.btn-icon.btn-toggle[aria-pressed="true"] {
+  background: var(--accent);
+}
+
+.btn-icon.btn-toggle[aria-pressed="true"]:hover {
+  background: var(--accent-hover);
+}
+
 /* —— Lists —— */
 .list {
   list-style: none;
