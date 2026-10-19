@@ -7,7 +7,7 @@ from music import MusicPlayer
 from downloader import MusicDownloader
 from playlist import PlaylistManager
 from config import Config
-from voice_idle import VoiceIdleWatcher
+from voice_idle import VoiceIdleWatcher, format_leave_message, format_minutes
 
 # Bot intents ayarları
 intents = discord.Intents.default()
@@ -38,15 +38,29 @@ def _bot_voice_channel(guild):
         return None
     return me.voice.channel
 
+async def _send_leave_message(channel_name):
+    """AUTO_LEAVE_CHANNEL_ID ayarlıysa text kanalına ayrılma mesajı at"""
+    if not Config.AUTO_LEAVE_CHANNEL_ID:
+        return
+    try:
+        channel_id = int(Config.AUTO_LEAVE_CHANNEL_ID)
+        channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+        message = format_leave_message(Config.AUTO_LEAVE_MESSAGE, channel_name, Config.AUTO_LEAVE_SECONDS)
+        await channel.send(message)
+    except Exception as e:
+        print(f"⚠️ Ayrılma mesajı gönderilemedi (AUTO_LEAVE_CHANNEL_ID={Config.AUTO_LEAVE_CHANNEL_ID}): {e}", flush=True)
+
 async def _leave_idle_channel(guild):
-    """Kanalda kimse kalmadığı için ayrıl ve player'ı temizle"""
+    """Kanalda kimse kalmadığı için ayrıl, player'ı temizle ve haber ver"""
     vc = guild.voice_client
+    channel_name = vc.channel.name if vc is not None and vc.channel is not None else None
     if vc is not None:
         await vc.disconnect()
     player = music_players.pop(guild.id, None)
     if player is not None:
         player.cleanup()
     print(f"👋 {guild.name}: ses kanalında {Config.AUTO_LEAVE_SECONDS} sn kimse olmadığı için ayrıldım", flush=True)
+    await _send_leave_message(channel_name)
 
 voice_idle = VoiceIdleWatcher(Config.AUTO_LEAVE_SECONDS, _bot_voice_channel, _leave_idle_channel)
 
@@ -398,13 +412,15 @@ async def help_command(interaction: discord.Interaction):
     )
     
     # Ses Kanalı Komutları
+    voice_help = (
+        "`/join` - Botu ses kanalına çağır\n"
+        "`/leave` - Botu ses kanalından çıkar"
+    )
+    if Config.AUTO_LEAVE_SECONDS > 0:
+        voice_help += f"\n_Kanalda {format_minutes(Config.AUTO_LEAVE_SECONDS)} dk kimse kalmazsa bot kendiliğinden ayrılır._"
     embed.add_field(
         name="🔊 Ses Kanalı Komutları",
-        value=(
-            "`/join` - Botu ses kanalına çağır\n"
-            "`/leave` - Botu ses kanalından çıkar\n"
-            "_Kanalda 5 dk kimse kalmazsa bot kendiliğinden ayrılır._"
-        ),
+        value=voice_help,
         inline=False
     )
     

@@ -133,3 +133,20 @@ async def test_update_during_on_idle_does_not_cancel_cleanup():
     await asyncio.sleep(TIMEOUT * 3)
 
     assert finished == [1]
+
+
+def test_leave_message_fills_placeholders():
+    from voice_idle import format_leave_message
+
+    text = format_leave_message("{channel} boştu, {minutes} dk bekledim {kalsın}", "Genel", 600)
+
+    assert text == "Genel boştu, 10 dk bekledim {kalsın}"
+
+
+def test_leave_message_uses_default_when_template_empty():
+    from voice_idle import format_leave_message
+
+    text = format_leave_message("", "Müzik", 90)
+
+    assert "Müzik" in text
+    assert "1.5" in text

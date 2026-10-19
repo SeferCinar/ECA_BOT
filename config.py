@@ -32,9 +32,14 @@ class Config:
 
     # Ses kanalında kimse kalmazsa bu kadar saniye sonra kanaldan ayrıl (0 = kapalı)
     try:
-        AUTO_LEAVE_SECONDS = max(0, int(os.getenv('AUTO_LEAVE_SECONDS', '300')))
+        AUTO_LEAVE_SECONDS = max(0, int(os.getenv('AUTO_LEAVE_SECONDS', '600').strip() or '600'))
     except ValueError:
-        AUTO_LEAVE_SECONDS = 300
+        AUTO_LEAVE_SECONDS = 600
+
+    # Otomatik ayrılınca mesaj atılacak text kanalı (boşsa mesaj atılmaz)
+    AUTO_LEAVE_CHANNEL_ID = os.getenv('AUTO_LEAVE_CHANNEL_ID', '').strip() or None
+    # Mesaj metni; {channel} = ses kanalı adı, {minutes} = bekleme süresi (dk)
+    AUTO_LEAVE_MESSAGE = os.getenv('AUTO_LEAVE_MESSAGE', '').strip()
 
     # Web control panel
     WEB_UI_TOKEN = os.getenv('WEB_UI_TOKEN', '').strip()

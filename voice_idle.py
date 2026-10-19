@@ -1,5 +1,19 @@
 import asyncio
 
+DEFAULT_LEAVE_MESSAGE = "👋 **{channel}** kanalında {minutes} dakika kimse olmadığı için ayrıldım."
+
+
+def format_minutes(seconds) -> str:
+    """Saniyeyi dakika olarak yaz: 600 -> '10', 90 -> '1.5'."""
+    minutes = seconds / 60
+    return str(int(minutes)) if minutes == int(minutes) else f"{minutes:g}"
+
+
+def format_leave_message(template, channel_name, seconds) -> str:
+    """{channel} ve {minutes} yer tutucularını doldur; diğer süslü parantezlere dokunma."""
+    text = template or DEFAULT_LEAVE_MESSAGE
+    return text.replace("{channel}", channel_name or "ses").replace("{minutes}", format_minutes(seconds))
+
 
 class VoiceIdleWatcher:
     """Botun ses kanalında yalnız kaldığı süreyi izler; süre dolunca on_idle çağırır.
