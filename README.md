@@ -13,6 +13,8 @@ Kişisel sunucunuz için geliştirilmiş Discord müzik botu. Yerel müzik dosya
 - ⏭️ Şarkı geçme
 - 🔊 Ses seviyesi kontrolü
 - 🔀 Kuyruk karıştırma
+- 🗑️ Kuyruktan şarkı kaldırma (Discord ve web arayüzü)
+- 💤 Ses kanalında 5 dk kimse kalmazsa otomatik ayrılma (`AUTO_LEAVE_SECONDS`)
 - ⚡ Discord slash komutları desteği
 
 ## Kurulum
@@ -297,6 +299,7 @@ Bot artık Discord'un slash komut sistemini kullanıyor! Discord'da `/` yazdığ
 - `/queue` - Kuyruğu göster
 - `/nowplaying` - Şu an çalan şarkıyı göster
 - `/volume [vol:<0-100>]` - Ses seviyesini ayarla
+- `/remove position:<sıra>` - Kuyruktan şarkı kaldır (`/queue` listesindeki numara)
 - `/clear` - Kuyruğu temizle
 - `/shuffle` - Kuyruğu karıştır
 - `/help` - Tüm komutlar hakkında bilgi göster

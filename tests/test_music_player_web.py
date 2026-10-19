@@ -330,3 +330,47 @@ async def test_play_next_with_none_interaction_uses_voice_client():
     after_cb(Exception("boom"))
     # Invoke with None -> schedules play_next(None); ensure no crash
     after_cb(None)
+
+
+def _queued(name, queue_id):
+    return {"file": f"/tmp/{name}", "name": name, "user": WebUser(), "is_stream": False, "queue_id": queue_id}
+
+
+def test_remove_from_queue_by_id_removes_only_that_entry():
+    """Duplicates share a name; removal must target the queue_id, not the first match."""
+    p = MusicPlayer(FakeBot())
+    p.queue.extend([_queued("dup.mp3", "a"), _queued("dup.mp3", "b"), _queued("other.mp3", "c")])
+
+    removed = p.remove_from_queue("b")
+
+    assert removed["queue_id"] == "b"
+    assert [s["queue_id"] for s in p.queue] == ["a", "c"]
+
+
+def test_remove_from_queue_unknown_id_returns_none():
+    p = MusicPlayer(FakeBot())
+    p.queue.append(_queued("a.mp3", "a"))
+
+    assert p.remove_from_queue("missing") is None
+    assert len(p.queue) == 1
+
+
+@pytest.mark.asyncio
+async def test_remove_at_uses_one_based_position():
+    p = MusicPlayer(FakeBot())
+    p.queue.extend([_queued("a.mp3", "a"), _queued("b.mp3", "b"), _queued("c.mp3", "c")])
+
+    removed = await p.remove_at(None, 2)
+
+    assert removed["name"] == "b.mp3"
+    assert [s["queue_id"] for s in p.queue] == ["a", "c"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("position", [0, 3, -1])
+async def test_remove_at_rejects_out_of_range(position):
+    p = MusicPlayer(FakeBot())
+    p.queue.extend([_queued("a.mp3", "a"), _queued("b.mp3", "b")])
+
+    assert await p.remove_at(None, position) is None
+    assert len(p.queue) == 2

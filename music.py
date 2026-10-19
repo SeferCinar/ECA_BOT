@@ -64,6 +64,31 @@ class MusicPlayer:
             raise ValueError("invalid queue order")
         self.queue = deque(by_id[queue_id] for queue_id in queue_ids)
 
+    def remove_from_queue(self, queue_id: str):
+        """Kuyruktan queue_id ile şarkı çıkar. Returns removed song or None."""
+        for index, song in enumerate(self.queue):
+            if self._ensure_queue_id(song) == queue_id:
+                del self.queue[index]
+                return song
+        return None
+
+    async def remove_at(self, interaction, position: int):
+        """Kuyruktan sıra numarasıyla (1'den başlar) şarkı çıkar. Returns removed song or None."""
+        if len(self.queue) == 0:
+            await self._send_message(interaction, "📭 Kuyruk boş!", ephemeral=True)
+            return None
+        if position < 1 or position > len(self.queue):
+            await self._send_message(
+                interaction,
+                f"❌ Geçersiz sıra! Kuyrukta {len(self.queue)} şarkı var.",
+                ephemeral=True,
+            )
+            return None
+        song = self.queue[position - 1]
+        del self.queue[position - 1]
+        await self._send_message(interaction, f"🗑️ **{song['name']}** kuyruktan kaldırıldı!")
+        return song
+
     def snapshot(self):
         """JSON-serializable player state for web UI / API."""
         def song_dict(s, include_queue_id=False):
