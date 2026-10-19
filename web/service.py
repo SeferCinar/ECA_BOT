@@ -21,11 +21,13 @@ class MusicService:
         downloader: Any,
         playlist_manager: Any,
         default_guild_id: Optional[str] = None,
+        ytm: Any = None,
     ):
         self.bot = bot
         self.get_player = get_player
         self.downloader = downloader
         self.playlist_manager = playlist_manager
+        self.ytm = ytm  # ytm.YTMClient: YouTube Music arama/albüm/playlist
         self.default_guild_id = default_guild_id
         self._search_by_session: dict = {}  # session_key -> list[dict]
 
@@ -76,6 +78,7 @@ class MusicService:
             "is_playing": player.is_playing,
             "is_paused": player.is_paused,
             "autoplay": bool(getattr(player, "autoplay", False)),
+            "is_loading": getattr(player, "_resolving_song", None) is not None,
         }
 
     def get_now(self, guild_id: Optional[str] = None):
@@ -400,6 +403,68 @@ class MusicService:
         if player.remove_from_queue(queue_id) is None:
             raise ServiceError("Song not in queue", "NOT_IN_QUEUE", 404)
         return player.snapshot()
+
+    # ----- Hızlı ekleme (stream adresi çalma sırası gelince alınır) -----
+
+    def _player_in_voice(self, guild_id: Optional[str] = None):
+        player, g = self._player(guild_id)
+        if g.voice_client is None:
+            raise ServiceError("Join a voice channel first", "VOICE_NOT_CONNECTED", 409)
+        return player, g
+
+    async def add_tracks(
+        self,
+        tracks: list,
+        requested_by: Optional[str] = None,
+        guild_id: Optional[str] = None,
+    ) -> dict:
+        """tracks: [{video_id, title, artists}] — sırayla, beklemeden kuyruğa eklenir."""
+        player, g = self._player_in_voice(guild_id)
+        if not tracks:
+            raise ServiceError("No tracks", "NO_TRACKS", 400)
+        user = WebUser(requested_by) if requested_by else WebUser()
+        added = player.enqueue_tracks(tracks, user)
+        player.start_if_idle()
+        return {**self.state_snapshot(str(g.id)), "added": len(added)}
+
+    async def add_collection(
+        self,
+        ref: str,
+        requested_by: Optional[str] = None,
+        guild_id: Optional[str] = None,
+    ) -> dict:
+        """Albüm (MPRE...) ya da playlist (VL.../PL.../OLAK...) şarkılarının hepsini ekle."""
+        self._player_in_voice(guild_id)  # YouTube'a gitmeden önce kontrol et
+        collection = await self.ytm_collection(ref)
+        if not collection["tracks"]:
+            raise ServiceError("Collection has no playable tracks", "EMPTY", 409)
+        result = await self.add_tracks(collection["tracks"], requested_by, guild_id)
+        return {**result, "collection": {"kind": collection["kind"], "title": collection["title"]}}
+
+    # ----- YouTube Music göz atma -----
+
+    async def _ytm(self, call):
+        if self.ytm is None:
+            raise ServiceError("YouTube Music unavailable", "YTM_UNAVAILABLE", 503)
+        try:
+            return await call(self.ytm)
+        except ValueError:
+            raise ServiceError("Invalid id", "INVALID_ID", 400)
+        except Exception as e:
+            raise ServiceError(str(e) or "YouTube Music request failed", "YTM_FAILED", 502)
+
+    async def ytm_search(self, query: str, kind: str = "songs") -> list:
+        if kind not in ("songs", "albums", "playlists"):
+            raise ServiceError("kind must be songs, albums or playlists", "INVALID_KIND", 400)
+        if not (query or "").strip():
+            raise ServiceError("query required", "INVALID_QUERY", 400)
+        return await self._ytm(lambda ytm: ytm.search(query.strip(), kind))
+
+    async def ytm_collection(self, ref: str) -> dict:
+        return await self._ytm(lambda ytm: ytm.collection(ref))
+
+    async def ytm_home(self) -> list:
+        return await self._ytm(lambda ytm: ytm.home())
 
     async def playlist_import_youtube(self, name: str, url: str) -> dict:
         from urllib.parse import urlparse

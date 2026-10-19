@@ -281,3 +281,46 @@ def test_static_files_require_revalidation():
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-cache"
+
+
+def _app_with(service):
+    app = create_app(bot=service.bot, full_ui=True)
+    app.state.web_token = "t"
+    app.state.session_secret = create_session_secret("s")
+    app.state.music_service = service
+    return TestClient(app)
+
+
+def test_queue_add_validates_video_ids():
+    bot = FakeBot()
+    service = MusicService(bot, lambda gid: FakePlayer(), None, None, "1")
+    service.add_tracks = AsyncMock(return_value={"added": 1})
+    client = _app_with(service)
+    auth = {"Authorization": "Bearer t"}
+
+    assert client.post("/api/queue/add", json={"tracks": [{"video_id": "BSTsnWoslP4"}]}).status_code == 401
+    assert client.post("/api/queue/add", headers=auth, json={"tracks": [{"video_id": "bad id"}]}).status_code == 422
+    assert client.post("/api/queue/add", headers=auth, json={"tracks": []}).status_code == 422
+
+    response = client.post(
+        "/api/queue/add",
+        headers=auth,
+        json={"tracks": [{"video_id": "BSTsnWoslP4", "title": "Bohemian Rhapsody", "artists": "Queen"}],
+              "requested_by": "YT Music"},
+    )
+
+    assert response.status_code == 200
+    service.add_tracks.assert_awaited_once_with(
+        [{"video_id": "BSTsnWoslP4", "title": "Bohemian Rhapsody", "artists": "Queen"}], "YT Music", None
+    )
+
+
+def test_ytm_search_endpoint_maps_service_errors():
+    bot = FakeBot()
+    service = MusicService(bot, lambda gid: FakePlayer(), None, None, "1")  # no ytm client
+    client = _app_with(service)
+
+    response = client.get("/api/ytm/search", params={"q": "queen"}, headers={"Authorization": "Bearer t"})
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "YTM_UNAVAILABLE"

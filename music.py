@@ -51,7 +51,9 @@ class MusicPlayer:
         self.played_ids = deque(maxlen=self.AUTOPLAY_HISTORY)
         self._autoplay_pool = []
         self._autoplay_pending = False
-        self._epoch = 0  # stop/cleanup/autoplay kapatma sırasında süren autoplay'i geçersiz kılar
+        self._epoch = 0  # stop/skip/cleanup/autoplay kapatma sırasında süren aramaları geçersiz kılar
+        self._resolving_song = None  # stream adresi alınmakta olan şarkı
+        self._start_task = None
 
     def set_voice_client(self, voice_client):
         """Store voice client for web path (no Interaction)."""
@@ -135,6 +137,7 @@ class MusicPlayer:
             "is_playing": self.is_playing,
             "is_paused": self.is_paused,
             "autoplay": self.autoplay,
+            "is_loading": self._resolving_song is not None,
         }
     
     async def add_to_queue(self, interaction, file_path, user):
@@ -208,7 +211,17 @@ class MusicPlayer:
             return
         
         self.voice_client = voice_client
-        
+
+        # Hızlı eklenen şarkılar: stream adresi çalma sırası gelince alınır
+        if song.get('is_stream') and not song.get('stream_url'):
+            ready = await self._resolve_stream(song)
+            if ready is None:
+                return  # stop/skip/leave araya girdi
+            if not ready:
+                await self._send_message(interaction, f"⚠️ **{song['name']}** çalınamadı, sıradakine geçiyorum.")
+                await self.play_next(interaction)
+                return
+
         # Stream mi yoksa yerel dosya mı kontrol et
         if self.current.get('is_stream', False):
             # Stream için FFmpeg ayarları
@@ -244,9 +257,63 @@ class MusicPlayer:
             )
 
         self.voice_client.play(source, after=_after)
-        
+        if self.is_paused:  # stream adresi alınırken duraklatıldıysa
+            self.voice_client.pause()
+
         await self._send_message(interaction, f"{source_type} Şimdi çalıyor: **{self.current['name']}** (İsteyen: {self.current['user'].mention})")
     
+    async def _resolve_stream(self, song):
+        """Kuyruktaki şarkının stream adresini al.
+
+        Returns True if ready, False if it failed, None if stop/skip/leave happened meanwhile.
+        """
+        epoch = self._epoch
+        self._resolving_song = song
+        info = None
+        try:
+            if self.downloader is not None:
+                info = await self.downloader.get_stream_url(song['webpage_url'])
+        except Exception as e:
+            print(f"⚠️ Stream alınamadı ({song['name']}): {e}", flush=True)
+        finally:
+            # skip sonrası sıradaki şarkı çoktan çözülmeye başlamış olabilir; onunkini silme
+            if self._resolving_song is song:
+                self._resolving_song = None
+        if epoch != self._epoch or self.current is not song:
+            return None
+        if not info:
+            return False
+        song['stream_url'] = info['url']
+        return True
+
+    def enqueue_tracks(self, tracks, user):
+        """Şarkıları stream adresini almadan kuyruğa ekle (adres çalma sırası gelince alınır).
+
+        tracks: [{video_id, title, artists?}]. Returns the queued song dicts.
+        """
+        added = []
+        for t in tracks:
+            title = t.get('title') or t['video_id']
+            song = {
+                'name': f"{t['artists']} - {title}" if t.get('artists') else title,
+                'user': user,
+                'is_stream': True,
+                'stream_url': None,
+                'webpage_url': f"https://www.youtube.com/watch?v={t['video_id']}",
+            }
+            self._ensure_queue_id(song)
+            self.queue.append(song)
+            added.append(song)
+        return added
+
+    def start_if_idle(self):
+        """Çalmıyorsa sıradakini başlat; stream adresi arka planda alınır, çağıran beklemez."""
+        if self.is_playing or self.is_paused:
+            return
+        if self._start_task is not None and not self._start_task.done():
+            return  # aynı anda gelen eklemeler ikinci kez başlatmasın
+        self._start_task = asyncio.create_task(self.play_next(None))
+
     def set_autoplay(self, enabled):
         """Autoplay'i aç/kapat. Kapatınca süren bir autoplay araması iptal olur."""
         self.autoplay = bool(enabled)
@@ -324,7 +391,12 @@ class MusicPlayer:
             await self._send_message(interaction, "❌ Şu anda hiçbir şarkı çalmıyor!")
             return
         
-        if self.voice_client:
+        if self._resolving_song is not None:
+            # Stream adresi alınırken VC'de çalan bir şey yok: o şarkıyı bırak, sıradakine geç.
+            # Beklemeden başlat; Discord yanıtı 3 sn içinde gitmeli.
+            self._epoch += 1
+            asyncio.create_task(self.play_next(None))
+        elif self.voice_client:
             # stop() fires after-callback which calls play_next — do not double-advance
             self.voice_client.stop()
         else:

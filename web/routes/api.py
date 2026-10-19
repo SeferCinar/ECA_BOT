@@ -59,6 +59,66 @@ async def queue_reorder(body: QueueReorderBody, request: Request):
         handle(e)
 
 
+class TrackIn(BaseModel):
+    video_id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
+    title: str = Field(default="", max_length=300)
+    artists: str = Field(default="", max_length=300)
+
+
+class QueueAddBody(BaseModel):
+    tracks: list[TrackIn] = Field(min_length=1, max_length=200)
+    requested_by: Optional[str] = Field(default=None, min_length=1, max_length=32)
+    guild_id: Optional[str] = None
+
+
+class QueueAddCollectionBody(BaseModel):
+    id: str = Field(min_length=2, max_length=100)
+    requested_by: Optional[str] = Field(default=None, min_length=1, max_length=32)
+    guild_id: Optional[str] = None
+
+
+@router.post("/queue/add")
+async def queue_add(body: QueueAddBody, request: Request):
+    try:
+        return await svc(request).add_tracks(
+            [t.model_dump() for t in body.tracks], body.requested_by, body.guild_id
+        )
+    except ServiceError as e:
+        handle(e)
+
+
+@router.post("/queue/add-collection")
+async def queue_add_collection(body: QueueAddCollectionBody, request: Request):
+    try:
+        return await svc(request).add_collection(body.id, body.requested_by, body.guild_id)
+    except ServiceError as e:
+        handle(e)
+
+
+@router.get("/ytm/search")
+async def ytm_search(request: Request, q: str, kind: str = "songs"):
+    try:
+        return {"results": await svc(request).ytm_search(q, kind)}
+    except ServiceError as e:
+        handle(e)
+
+
+@router.get("/ytm/collection/{ref}")
+async def ytm_collection(ref: str, request: Request):
+    try:
+        return await svc(request).ytm_collection(ref)
+    except ServiceError as e:
+        handle(e)
+
+
+@router.get("/ytm/home")
+async def ytm_home(request: Request):
+    try:
+        return {"sections": await svc(request).ytm_home()}
+    except ServiceError as e:
+        handle(e)
+
+
 @router.delete("/queue/{queue_id}")
 async def queue_remove(queue_id: str, request: Request, guild_id: Optional[str] = None):
     try:

@@ -611,8 +611,10 @@ if __name__ == '__main__':
         app = create_app(bot=bot, full_ui=full)
         app.state.web_token = Config.WEB_UI_TOKEN
         app.state.session_secret = create_session_secret(Config.WEB_UI_SESSION_SECRET)
+        from ytm import YTMClient
         app.state.music_service = MusicService(
-            bot, get_music_player, downloader, playlist_manager, Config.WEB_UI_GUILD_ID
+            bot, get_music_player, downloader, playlist_manager, Config.WEB_UI_GUILD_ID,
+            ytm=YTMClient(),
         )
         port = Config.web_port()
         bot.loop.create_task(start_web_server(app, port=port))
