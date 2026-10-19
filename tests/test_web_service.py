@@ -464,3 +464,33 @@ async def test_playlist_import_empty_or_all_duplicate_source_does_not_save(
         "skipped": skipped,
     }
     assert manager.save_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_remove_from_queue_returns_snapshot_without_removed_entry():
+    from music import MusicPlayer
+
+    g = G(1)
+    player = MusicPlayer(None)
+    player.queue.extend([
+        {"name": "First", "user": "u", "queue_id": "first"},
+        {"name": "Second", "user": "u", "queue_id": "second"},
+    ])
+    svc = MusicService(FakeBot([g]), lambda _id: player, None, None, "1")
+
+    result = await svc.remove_from_queue("first")
+
+    assert [entry["queue_id"] for entry in result["queue"]] == ["second"]
+
+
+@pytest.mark.asyncio
+async def test_remove_from_queue_unknown_id_raises_not_found():
+    from music import MusicPlayer
+
+    g = G(1)
+    svc = MusicService(FakeBot([g]), lambda _id: MusicPlayer(None), None, None, "1")
+
+    with pytest.raises(ServiceError) as exc:
+        await svc.remove_from_queue("missing")
+    assert exc.value.status == 404
+    assert exc.value.code == "NOT_IN_QUEUE"

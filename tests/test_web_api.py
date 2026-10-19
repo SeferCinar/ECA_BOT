@@ -205,3 +205,28 @@ def test_playlist_import_service_error_preserves_status_and_code():
 
     assert response.status_code == 502
     assert response.json()["detail"]["code"] == "IMPORT_FAILED"
+
+
+def test_queue_remove_requires_auth_and_maps_missing_to_404():
+    bot = FakeBot()
+    app = create_app(bot=bot, full_ui=True)
+    app.state.web_token = "t"
+    app.state.session_secret = create_session_secret("s")
+    service = MusicService(bot, lambda gid: FakePlayer(), None, None, "1")
+    app.state.music_service = service
+    client = TestClient(app)
+
+    assert client.delete("/api/queue/abc").status_code == 401
+
+    service.remove_from_queue = AsyncMock(return_value={"queue": []})
+    response = client.delete("/api/queue/abc", headers={"Authorization": "Bearer t"})
+    assert response.status_code == 200
+    assert response.json()["queue"] == []
+    service.remove_from_queue.assert_awaited_once_with("abc", None)
+
+    service.remove_from_queue = AsyncMock(
+        side_effect=ServiceError("Song not in queue", "NOT_IN_QUEUE", 404)
+    )
+    response = client.delete("/api/queue/abc", headers={"Authorization": "Bearer t"})
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "NOT_IN_QUEUE"

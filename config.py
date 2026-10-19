@@ -30,6 +30,12 @@ class Config:
     # PO Token provider adresi (bot algılamasını hesaba gerek kalmadan aşmak için)
     POT_PROVIDER_BASE_URL = os.getenv('POT_PROVIDER_BASE_URL', 'http://pot-provider:4416')
 
+    # Ses kanalında kimse kalmazsa bu kadar saniye sonra kanaldan ayrıl (0 = kapalı)
+    try:
+        AUTO_LEAVE_SECONDS = max(0, int(os.getenv('AUTO_LEAVE_SECONDS', '300')))
+    except ValueError:
+        AUTO_LEAVE_SECONDS = 300
+
     # Web control panel
     WEB_UI_TOKEN = os.getenv('WEB_UI_TOKEN', '').strip()
     WEB_UI_GUILD_ID = os.getenv('WEB_UI_GUILD_ID', '').strip() or None

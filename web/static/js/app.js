@@ -330,6 +330,21 @@
     }
   }
 
+  async function removeQueueItem(queueId) {
+    try {
+      const snapshot = await api("/api/queue/" + encodeURIComponent(queueId), {
+        method: "DELETE",
+      });
+      applySnapshot(snapshot);
+    } catch (err) {
+      if (err.status === 401) {
+        showLogin();
+      } else {
+        toastError(err);
+      }
+    }
+  }
+
   function handleQueueDragStart(event) {
     queueDragActive = true;
     queueDragStartOrder = JSON.stringify(queueOrderFromDom());
@@ -395,7 +410,13 @@
         " · " +
         escapeHtml(song.user || "—") +
         "</div>" +
+        "</div>" +
+        '<div class="item-actions">' +
+        '<button type="button" class="btn btn-sm btn-danger" draggable="false">Kaldır</button>' +
         "</div>";
+      li.querySelector("button").addEventListener("click", function () {
+        removeQueueItem(song.queue_id);
+      });
       el.queueList.appendChild(li);
     });
   }

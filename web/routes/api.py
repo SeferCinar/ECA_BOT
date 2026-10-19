@@ -59,6 +59,14 @@ async def queue_reorder(body: QueueReorderBody, request: Request):
         handle(e)
 
 
+@router.delete("/queue/{queue_id}")
+async def queue_remove(queue_id: str, request: Request, guild_id: Optional[str] = None):
+    try:
+        return await svc(request).remove_from_queue(queue_id, guild_id)
+    except ServiceError as e:
+        handle(e)
+
+
 @router.post("/control/{action}")
 async def control(action: str, request: Request, guild_id: Optional[str] = None):
     try:

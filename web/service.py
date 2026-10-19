@@ -381,6 +381,14 @@ class MusicService:
             raise ServiceError(str(error), "INVALID_QUEUE_ORDER", 400)
         return player.snapshot()
 
+    async def remove_from_queue(
+        self, queue_id: str, guild_id: Optional[str] = None
+    ) -> dict:
+        player, _ = self._player(guild_id)
+        if player.remove_from_queue(queue_id) is None:
+            raise ServiceError("Song not in queue", "NOT_IN_QUEUE", 404)
+        return player.snapshot()
+
     async def playlist_import_youtube(self, name: str, url: str) -> dict:
         from urllib.parse import urlparse
 

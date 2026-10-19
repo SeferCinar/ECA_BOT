@@ -7,6 +7,7 @@ from music import MusicPlayer
 from downloader import MusicDownloader
 from playlist import PlaylistManager
 from config import Config
+from voice_idle import VoiceIdleWatcher
 
 # Bot intents ayarları
 intents = discord.Intents.default()
@@ -27,6 +28,36 @@ def get_music_player(guild_id):
     if guild_id not in music_players:
         music_players[guild_id] = MusicPlayer(bot)
     return music_players[guild_id]
+
+# ========== BOŞ KANALDAN OTOMATİK AYRILMA ==========
+
+def _bot_voice_channel(guild):
+    """Botun guild'de bulunduğu ses kanalı (yoksa None)"""
+    me = guild.me
+    if me is None or me.voice is None:
+        return None
+    return me.voice.channel
+
+async def _leave_idle_channel(guild):
+    """Kanalda kimse kalmadığı için ayrıl ve player'ı temizle"""
+    vc = guild.voice_client
+    if vc is not None:
+        await vc.disconnect()
+    player = music_players.pop(guild.id, None)
+    if player is not None:
+        player.cleanup()
+    print(f"👋 {guild.name}: ses kanalında {Config.AUTO_LEAVE_SECONDS} sn kimse olmadığı için ayrıldım", flush=True)
+
+voice_idle = VoiceIdleWatcher(Config.AUTO_LEAVE_SECONDS, _bot_voice_channel, _leave_idle_channel)
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    """Ses kanalı giriş/çıkışlarında boş kanal zamanlayıcısını güncelle"""
+    if Config.AUTO_LEAVE_SECONDS <= 0:
+        return
+    if before.channel == after.channel:
+        return  # mute/deafen gibi değişiklikler
+    voice_idle.update(member.guild)
 
 # ========== SEARCH BUTON VIEW ==========
 
@@ -344,6 +375,13 @@ async def clear_queue(interaction: discord.Interaction):
     player = get_music_player(interaction.guild.id)
     await player.clear_queue(interaction)
 
+@tree.command(name='remove', description='Kuyruktan şarkı kaldır')
+@app_commands.describe(position='Kaldırılacak şarkının sırası (/queue listesindeki numara)')
+async def remove_from_queue(interaction: discord.Interaction, position: int):
+    """Kuyruktan şarkı kaldır"""
+    player = get_music_player(interaction.guild.id)
+    await player.remove_at(interaction, position)
+
 @tree.command(name='shuffle', description='Kuyruğu karıştır')
 async def shuffle_queue(interaction: discord.Interaction):
     """Kuyruğu karıştır"""
@@ -364,7 +402,8 @@ async def help_command(interaction: discord.Interaction):
         name="🔊 Ses Kanalı Komutları",
         value=(
             "`/join` - Botu ses kanalına çağır\n"
-            "`/leave` - Botu ses kanalından çıkar"
+            "`/leave` - Botu ses kanalından çıkar\n"
+            "_Kanalda 5 dk kimse kalmazsa bot kendiliğinden ayrılır._"
         ),
         inline=False
     )
@@ -382,6 +421,7 @@ async def help_command(interaction: discord.Interaction):
             "`/queue` - Kuyruğu göster\n"
             "`/nowplaying` - Şu an çalan şarkıyı göster\n"
             "`/volume [vol:<0-100>]` - Ses seviyesini ayarla\n"
+            "`/remove position:<sıra>` - Kuyruktan şarkı kaldır\n"
             "`/clear` - Kuyruğu temizle\n"
             "`/shuffle` - Kuyruğu karıştır"
         ),
