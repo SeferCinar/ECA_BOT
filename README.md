@@ -16,7 +16,8 @@ Kişisel sunucunuz için geliştirilmiş Discord müzik botu. Yerel müzik dosya
 - 🗑️ Kuyruktan şarkı kaldırma (Discord ve web arayüzü)
 - 💤 Ses kanalında kimse kalmazsa otomatik ayrılma (varsayılan 5 dk, `AUTO_LEAVE_SECONDS`) ve isteğe bağlı text kanalına bildirim (`AUTO_LEAVE_CHANNEL_ID`, `AUTO_LEAVE_MESSAGE`)
 - 📻 Autoplay: kuyruk bitince son şarkıya benzer şarkılarla devam (`/autoplay`, web panelindeki 📻 butonu)
-- 🖥️ YTMDesktop'tan tek tıkla şarkı gönderme (bkz. [eca-ytmd-companion](https://github.com/OmerEmreBozkurt/eca-ytmd-companion))
+- 🎧 Web panelinde **YT Music** sekmesi: ana sayfa önerileri, şarkı/albüm/playlist arama, tek tıkla kuyruğa ekleme
+- 🧩 YouTube Music'te şarkıları tek tıkla kuyruğa ekleyen tarayıcı eklentisi (bkz. [eca-ytm-extension](https://github.com/OmerEmreBozkurt/eca-ytm-extension))
 - ⚡ Discord slash komutları desteği
 
 ## Kurulum
