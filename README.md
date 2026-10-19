@@ -14,7 +14,7 @@ Kişisel sunucunuz için geliştirilmiş Discord müzik botu. Yerel müzik dosya
 - 🔊 Ses seviyesi kontrolü
 - 🔀 Kuyruk karıştırma
 - 🗑️ Kuyruktan şarkı kaldırma (Discord ve web arayüzü)
-- 💤 Ses kanalında kimse kalmazsa otomatik ayrılma (varsayılan 10 dk, `AUTO_LEAVE_SECONDS`) ve isteğe bağlı text kanalına bildirim (`AUTO_LEAVE_CHANNEL_ID`, `AUTO_LEAVE_MESSAGE`)
+- 💤 Ses kanalında kimse kalmazsa otomatik ayrılma (varsayılan 5 dk, `AUTO_LEAVE_SECONDS`) ve isteğe bağlı text kanalına bildirim (`AUTO_LEAVE_CHANNEL_ID`, `AUTO_LEAVE_MESSAGE`)
 - ⚡ Discord slash komutları desteği
 
 ## Kurulum

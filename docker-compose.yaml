@@ -34,7 +34,7 @@ services:
       - .env
     environment:
       # Ses kanalında kimse kalmazsa kaç saniye sonra ayrılsın (0 = kapalı)
-      - AUTO_LEAVE_SECONDS=${AUTO_LEAVE_SECONDS:-600}
+      - AUTO_LEAVE_SECONDS=${AUTO_LEAVE_SECONDS:-300}
       # Ayrılınca mesaj atılacak text kanalının ID'si (boşsa mesaj atılmaz)
       - AUTO_LEAVE_CHANNEL_ID=${AUTO_LEAVE_CHANNEL_ID:-}
       # Mesaj metni; {channel} = ses kanalı adı, {minutes} = süre (dk). Boşsa varsayılan mesaj
