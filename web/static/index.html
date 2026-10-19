@@ -36,6 +36,7 @@
     <nav class="tabs" role="tablist">
       <button type="button" data-tab="player" class="tab active" role="tab">Player</button>
       <button type="button" data-tab="search" class="tab" role="tab">Ara / Çal</button>
+      <button type="button" data-tab="ytm" class="tab" role="tab">YT Music</button>
       <button type="button" data-tab="playlists" class="tab" role="tab">Playlist</button>
       <button type="button" data-tab="library" class="tab" role="tab">Kütüphane</button>
     </nav>
@@ -89,6 +90,26 @@
           </div>
           <ul id="search-results" class="list results"></ul>
           <p id="search-empty" class="empty muted">Sonuç yok — arama yapın</p>
+        </div>
+      </section>
+
+      <section id="tab-ytm" class="tab-panel" role="tabpanel" hidden>
+        <div class="card">
+          <div class="card-head">
+            <h2>YouTube Music</h2>
+            <button id="ytm-home-btn" type="button" class="btn btn-ghost btn-sm">Ana sayfa</button>
+          </div>
+          <form id="ytm-form" class="row">
+            <input id="ytm-query" type="search" class="grow" placeholder="Şarkı, albüm veya playlist ara…" />
+            <select id="ytm-kind" class="shrink" title="Ne aransın">
+              <option value="songs">Şarkı</option>
+              <option value="albums">Albüm</option>
+              <option value="playlists">Playlist</option>
+            </select>
+            <button type="submit" class="btn btn-primary">Ara</button>
+          </form>
+          <div id="ytm-view" class="ytm-view"></div>
+          <p id="ytm-status" class="empty muted">Ana sayfa yükleniyor…</p>
         </div>
       </section>
 

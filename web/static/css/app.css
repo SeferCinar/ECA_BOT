@@ -562,6 +562,50 @@ select:focus {
   flex-shrink: 0;
 }
 
+.list .thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--card-hover);
+}
+
+@media (min-width: 701px) {
+  .row > select.shrink {
+    width: auto;
+    flex: 0 0 auto;
+  }
+}
+
+.ytm-view {
+  margin-top: 0.75rem;
+}
+
+.ytm-section-title {
+  margin: 1.1rem 0 0.25rem;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.ytm-section-title:first-child {
+  margin-top: 0.25rem;
+}
+
+.ytm-head .list {
+  margin-top: 0.25rem;
+}
+
+.ytm-head .ytm-cover .thumb {
+  width: 72px;
+  height: 72px;
+}
+
+.ytm-head .ytm-cover .item-title {
+  white-space: normal;
+  font-size: 1.05rem;
+}
+
 .list .idx {
   width: 1.5rem;
   text-align: center;

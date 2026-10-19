@@ -185,6 +185,7 @@
       if (tab === "playlists") loadPlaylists();
       if (tab === "library") loadLibrary();
       if (tab === "search") el.searchQuery.focus();
+      if (tab === "ytm") ytmOnShow();
     });
   });
 
@@ -720,6 +721,228 @@
       el.searchResults.appendChild(li);
     });
   }
+
+  /* —— YouTube Music —— */
+  const ytm = {
+    form: document.getElementById("ytm-form"),
+    query: document.getElementById("ytm-query"),
+    kind: document.getElementById("ytm-kind"),
+    homeBtn: document.getElementById("ytm-home-btn"),
+    view: document.getElementById("ytm-view"),
+    status: document.getElementById("ytm-status"),
+  };
+  let ytmLoaded = false;
+  let ytmRequest = 0; // eski isteklerin geç gelen sonucunu yok saymak için
+  let ytmSaved = null; // albüm/playlist açılınca geri dönülecek liste (DOM, ✓ durumlarıyla)
+
+  function ytmSetStatus(text) {
+    ytm.status.textContent = text || "";
+    ytm.status.hidden = !text;
+  }
+
+  async function ytmLoad(path, render, loadingText) {
+    const req = ++ytmRequest;
+    ytm.view.innerHTML = "";
+    ytmSetStatus(loadingText || "Yükleniyor…");
+    try {
+      const data = await api(path);
+      if (req !== ytmRequest) return;
+      ytmSetStatus("");
+      render(data);
+    } catch (err) {
+      if (req !== ytmRequest) return;
+      if (err.status === 401) {
+        showLogin();
+        return;
+      }
+      ytmSetStatus("Yüklenemedi: " + err.message);
+    }
+  }
+
+  function ytmButton(label, cls, onClick) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn btn-sm " + cls;
+    b.textContent = label;
+    b.addEventListener("click", function () {
+      onClick(b);
+    });
+    return b;
+  }
+
+  function ytmRow(thumbnail, title, meta, actions) {
+    const li = document.createElement("li");
+    const img = document.createElement("img");
+    img.className = "thumb";
+    img.alt = "";
+    img.loading = "lazy";
+    img.referrerPolicy = "no-referrer";
+    if (thumbnail) img.src = thumbnail;
+    li.appendChild(img);
+    const main = document.createElement("div");
+    main.className = "item-main";
+    main.innerHTML =
+      '<div class="item-title">' +
+      escapeHtml(title) +
+      "</div>" +
+      (meta ? '<div class="item-meta">' + escapeHtml(meta) + "</div>" : "");
+    li.appendChild(main);
+    const act = document.createElement("div");
+    act.className = "item-actions";
+    actions.forEach(function (a) {
+      act.appendChild(a);
+    });
+    li.appendChild(act);
+    return li;
+  }
+
+  async function ytmAdd(btn, path, body) {
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "…";
+    try {
+      const snap = await api(path, { method: "POST", body: JSON.stringify(body) });
+      applySnapshot(snap);
+      btn.textContent = "✓";
+      const name = snap.collection ? snap.collection.title + ": " : "";
+      showToast(name + (snap.added > 1 ? snap.added + " şarkı kuyruğa eklendi" : "Kuyruğa eklendi"), true);
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = label;
+      if (err.status === 401) {
+        showLogin();
+      } else {
+        toastError(err);
+      }
+    }
+  }
+
+  function ytmItemRow(item) {
+    if (item.kind === "song") {
+      const meta = [item.artists, item.album, item.duration].filter(Boolean).join(" · ");
+      return ytmRow(item.thumbnail, item.title, meta, [
+        ytmButton("+ Ekle", "btn-green", function (b) {
+          ytmAdd(b, "/api/queue/add", {
+            tracks: [{ video_id: item.video_id, title: item.title, artists: item.artists }],
+          });
+        }),
+      ]);
+    }
+    const fallback = item.kind === "album" ? "Albüm" : "Playlist";
+    return ytmRow(item.thumbnail, item.title, item.subtitle || fallback, [
+      ytmButton("Aç", "btn-secondary", function () {
+        ytmOpen(item.id);
+      }),
+      ytmButton("+ Tümü", "btn-green", function (b) {
+        ytmAdd(b, "/api/queue/add-collection", { id: item.id });
+      }),
+    ]);
+  }
+
+  function ytmList(items) {
+    const ul = document.createElement("ul");
+    ul.className = "list";
+    items.forEach(function (item) {
+      ul.appendChild(ytmItemRow(item));
+    });
+    return ul;
+  }
+
+  function ytmRenderHome(data) {
+    const sections = (data && data.sections) || [];
+    if (!sections.length) {
+      ytmSetStatus("Öneri bulunamadı");
+      return;
+    }
+    sections.forEach(function (sec) {
+      const h = document.createElement("h3");
+      h.className = "ytm-section-title";
+      h.textContent = sec.title;
+      ytm.view.appendChild(h);
+      ytm.view.appendChild(ytmList(sec.items));
+    });
+  }
+
+  function ytmRenderResults(data) {
+    const results = (data && data.results) || [];
+    if (!results.length) {
+      ytmSetStatus("Sonuç yok");
+      return;
+    }
+    ytm.view.appendChild(ytmList(results));
+  }
+
+  function ytmRenderCollection(c) {
+    const head = document.createElement("div");
+    head.className = "ytm-head";
+    head.appendChild(ytmButton("← Geri", "btn-ghost", ytmBack));
+    const info = ytmRow(
+      c.thumbnail,
+      c.title,
+      [c.subtitle, c.tracks.length + " şarkı"].filter(Boolean).join(" · "),
+      [
+        ytmButton("+ Tümünü ekle", "btn-green", function (b) {
+          ytmAdd(b, "/api/queue/add-collection", { id: c.id });
+        }),
+      ]
+    );
+    info.classList.add("ytm-cover");
+    const ul = document.createElement("ul");
+    ul.className = "list";
+    ul.appendChild(info);
+    head.appendChild(ul);
+    ytm.view.appendChild(head);
+    ytm.view.appendChild(
+      ytmList(
+        c.tracks.map(function (t) {
+          return Object.assign({ kind: "song" }, t);
+        })
+      )
+    );
+  }
+
+  function ytmHome() {
+    ytmSaved = null;
+    ytmLoad("/api/ytm/home", ytmRenderHome, "Ana sayfa yükleniyor…");
+  }
+
+  function ytmOpen(id) {
+    ytmSaved = document.createDocumentFragment();
+    while (ytm.view.firstChild) ytmSaved.appendChild(ytm.view.firstChild);
+    ytmLoad("/api/ytm/collection/" + encodeURIComponent(id), ytmRenderCollection);
+  }
+
+  function ytmBack() {
+    if (!ytmSaved) {
+      ytmHome();
+      return;
+    }
+    ytmRequest++; // süren yüklemeyi iptal et
+    ytm.view.innerHTML = "";
+    ytm.view.appendChild(ytmSaved);
+    ytmSaved = null;
+    ytmSetStatus("");
+  }
+
+  function ytmOnShow() {
+    if (!ytmLoaded) {
+      ytmLoaded = true;
+      ytmHome();
+    }
+  }
+
+  ytm.homeBtn.addEventListener("click", ytmHome);
+  ytm.form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    const q = (ytm.query.value || "").trim();
+    if (!q) return;
+    ytmSaved = null;
+    ytmLoad(
+      "/api/ytm/search?q=" + encodeURIComponent(q) + "&kind=" + encodeURIComponent(ytm.kind.value),
+      ytmRenderResults,
+      "Aranıyor…"
+    );
+  });
 
   /* —— Playlists —— */
   async function loadPlaylists() {
