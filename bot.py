@@ -3,7 +3,8 @@ from discord import app_commands
 from discord.ext import commands
 import os
 from typing import Optional
-from music import MusicPlayer
+from music import AUDIO_FILTERS, MusicPlayer, format_time, parse_seek
+from now_playing import NowPlayingCard, NowPlayingView, build_embed
 from downloader import MusicDownloader
 from playlist import PlaylistManager
 from config import Config
@@ -23,11 +24,19 @@ music_players = {}
 downloader = MusicDownloader()
 playlist_manager = PlaylistManager()
 
-def get_music_player(guild_id):
-    """Guild için müzik player'ı al veya oluştur"""
+def get_music_player(guild_id, channel=None):
+    """Guild için müzik player'ı al veya oluştur.
+
+    channel: komutun yazıldığı text kanalı; NOW_PLAYING_CHANNEL_ID yoksa "Şimdi çalıyor" kartı oraya atılır.
+    """
     if guild_id not in music_players:
-        music_players[guild_id] = MusicPlayer(bot, downloader)
-    return music_players[guild_id]
+        player = MusicPlayer(bot, downloader)
+        player.card = NowPlayingCard(player, Config.NOW_PLAYING_CHANNEL_ID, guild_id)
+        music_players[guild_id] = player
+    player = music_players[guild_id]
+    if channel is not None:
+        player.card.fallback_channel = channel
+    return player
 
 # ========== BOŞ KANALDAN OTOMATİK AYRILMA ==========
 
@@ -124,7 +133,7 @@ class SearchView(discord.ui.View):
                 return
             await interaction.user.voice.channel.connect()
         
-        player = get_music_player(interaction.guild.id)
+        player = get_music_player(interaction.guild.id, interaction.channel)
         
         video_url = f"https://www.youtube.com/watch?v={self.selected['id']}"
         
@@ -210,7 +219,7 @@ async def play(interaction: discord.Interaction, query: str, download: bool = Fa
             return
         await interaction.user.voice.channel.connect()
     
-    player = get_music_player(interaction.guild.id)
+    player = get_music_player(interaction.guild.id, interaction.channel)
     
     # Link kontrolü
     if query.startswith(('http://', 'https://', 'www.')):
@@ -313,7 +322,7 @@ async def search(interaction: discord.Interaction, query: str, choice: Optional[
                     return
                 await interaction.user.voice.channel.connect()
             
-            player = get_music_player(interaction.guild.id)
+            player = get_music_player(interaction.guild.id, interaction.channel)
             
             # Stream (varsayılan)
             await interaction.followup.send(f"🌐 Stream hazırlanıyor: {selected['title']}")
@@ -332,45 +341,101 @@ async def search(interaction: discord.Interaction, query: str, choice: Optional[
 @tree.command(name='skip', description='Şarkıyı geç')
 async def skip(interaction: discord.Interaction):
     """Şarkıyı geç"""
-    player = get_music_player(interaction.guild.id)
+    player = get_music_player(interaction.guild.id, interaction.channel)
     await player.skip(interaction)
 
 @tree.command(name='stop', description='Müziği durdur')
 async def stop(interaction: discord.Interaction):
     """Müziği durdur"""
-    player = get_music_player(interaction.guild.id)
+    player = get_music_player(interaction.guild.id, interaction.channel)
     await player.stop(interaction)
 
 @tree.command(name='pause', description='Müziği duraklat')
 async def pause(interaction: discord.Interaction):
     """Müziği duraklat"""
-    player = get_music_player(interaction.guild.id)
+    player = get_music_player(interaction.guild.id, interaction.channel)
     await player.pause(interaction)
 
 @tree.command(name='resume', description='Müziği devam ettir')
 async def resume(interaction: discord.Interaction):
     """Müziği devam ettir"""
-    player = get_music_player(interaction.guild.id)
+    player = get_music_player(interaction.guild.id, interaction.channel)
     await player.resume(interaction)
 
 @tree.command(name='queue', description='Kuyruğu göster')
 async def queue(interaction: discord.Interaction):
     """Kuyruğu göster"""
-    player = get_music_player(interaction.guild.id)
+    player = get_music_player(interaction.guild.id, interaction.channel)
     await player.show_queue(interaction)
 
 @tree.command(name='nowplaying', description='Şu an çalan şarkıyı göster')
 async def nowplaying(interaction: discord.Interaction):
     """Şu an çalan şarkıyı göster"""
-    player = get_music_player(interaction.guild.id)
-    await player.now_playing(interaction)
+    player = get_music_player(interaction.guild.id, interaction.channel)
+    if player.current is None:
+        await interaction.response.send_message("❌ Şu anda hiçbir şarkı çalmıyor!")
+        return
+    await interaction.response.send_message(embed=build_embed(player))
+
+@tree.command(name='seek', description='Şarkıda belirli bir yere atla')
+@app_commands.describe(position='Konum: 1:30, 90 (saniye), +15 (ileri), -10 (geri)')
+async def seek(interaction: discord.Interaction, position: str):
+    """Şarkıda belirli bir yere atla"""
+    player = get_music_player(interaction.guild.id, interaction.channel)
+    if player.current is None or player.is_loading:
+        await interaction.response.send_message("❌ Şu anda hiçbir şarkı çalmıyor!", ephemeral=True)
+        return
+    try:
+        target = parse_seek(position, player.position())
+    except ValueError:
+        await interaction.response.send_message("❌ Geçersiz konum! Örnek: `1:30`, `90`, `+15`, `-10`", ephemeral=True)
+        return
+    duration = player.current.get('duration')
+    if duration and target >= duration:
+        await interaction.response.send_message(f"❌ Şarkı {format_time(duration)} uzunluğunda!", ephemeral=True)
+        return
+    await interaction.response.defer()  # FFmpeg'in yeni konumdan başlaması birkaç saniye sürebilir
+    await player.seek(interaction, target)
+
+LOOP_REPLIES = {
+    'off': "➡️ Döngü kapalı.",
+    'song': "🔂 Döngü: çalan şarkı tekrar edecek.",
+    'queue': "🔁 Döngü: kuyruk bitince baştan başlayacak.",
+}
+
+@tree.command(name='loop', description='Döngü modu: şarkıyı ya da kuyruğu tekrarla')
+@app_commands.describe(mode='Boş bırakırsan kapalı → şarkı → kuyruk arasında geçer')
+@app_commands.choices(mode=[
+    app_commands.Choice(name='kapalı', value='off'),
+    app_commands.Choice(name='şarkı', value='song'),
+    app_commands.Choice(name='kuyruk', value='queue'),
+])
+async def loop_command(interaction: discord.Interaction, mode: Optional[app_commands.Choice[str]] = None):
+    """Döngü modunu ayarla"""
+    player = get_music_player(interaction.guild.id, interaction.channel)
+    if mode is None:
+        player.cycle_loop()
+    else:
+        player.set_loop(mode.value)
+    await interaction.response.send_message(LOOP_REPLIES[player.loop_mode])
+
+@tree.command(name='filter', description='Ses filtresi: bassboost, nightcore, slowed + reverb, 8D')
+@app_commands.describe(effect='Uygulanacak filtre (çalan şarkıya kaldığı yerden uygulanır)')
+@app_commands.choices(effect=[app_commands.Choice(name='kapalı', value='off')] + [
+    app_commands.Choice(name=label, value=key) for key, (label, _, _) in AUDIO_FILTERS.items()
+])
+async def filter_command(interaction: discord.Interaction, effect: app_commands.Choice[str]):
+    """Ses filtresi uygula"""
+    player = get_music_player(interaction.guild.id, interaction.channel)
+    await interaction.response.defer()
+    await player.set_filter(interaction, None if effect.value == 'off' else effect.value)
 
 @tree.command(name='volume', description='Ses seviyesini ayarla')
 @app_commands.describe(vol='Ses seviyesi (0-100)')
 async def volume(interaction: discord.Interaction, vol: int = None):
     """Ses seviyesini ayarla (0-100)"""
     if vol is None:
-        player = get_music_player(interaction.guild.id)
+        player = get_music_player(interaction.guild.id, interaction.channel)
         current_vol = player.get_volume()
         await interaction.response.send_message(f"🔊 Mevcut ses seviyesi: {current_vol}%")
         return
@@ -379,21 +444,21 @@ async def volume(interaction: discord.Interaction, vol: int = None):
         await interaction.response.send_message("❌ Ses seviyesi 0-100 arasında olmalı!", ephemeral=True)
         return
     
-    player = get_music_player(interaction.guild.id)
+    player = get_music_player(interaction.guild.id, interaction.channel)
     await player.set_volume(interaction, vol / 100.0)
     await interaction.response.send_message(f"🔊 Ses seviyesi {vol}% olarak ayarlandı!")
 
 @tree.command(name='clear', description='Kuyruğu temizle')
 async def clear_queue(interaction: discord.Interaction):
     """Kuyruğu temizle"""
-    player = get_music_player(interaction.guild.id)
+    player = get_music_player(interaction.guild.id, interaction.channel)
     await player.clear_queue(interaction)
 
 @tree.command(name='remove', description='Kuyruktan şarkı kaldır')
 @app_commands.describe(position='Kaldırılacak şarkının sırası (/queue listesindeki numara)')
 async def remove_from_queue(interaction: discord.Interaction, position: int):
     """Kuyruktan şarkı kaldır"""
-    player = get_music_player(interaction.guild.id)
+    player = get_music_player(interaction.guild.id, interaction.channel)
     await player.remove_at(interaction, position)
 
 @tree.command(name='autoplay', description='Kuyruk bitince benzer şarkılarla devam et (aç/kapat)')
@@ -404,7 +469,7 @@ async def remove_from_queue(interaction: discord.Interaction, position: int):
 ])
 async def autoplay(interaction: discord.Interaction, state: Optional[app_commands.Choice[str]] = None):
     """Autoplay aç/kapat"""
-    player = get_music_player(interaction.guild.id)
+    player = get_music_player(interaction.guild.id, interaction.channel)
     enabled = (not player.autoplay) if state is None else state.value == 'on'
     player.set_autoplay(enabled)
     if enabled:
@@ -415,7 +480,7 @@ async def autoplay(interaction: discord.Interaction, state: Optional[app_command
 @tree.command(name='shuffle', description='Kuyruğu karıştır')
 async def shuffle_queue(interaction: discord.Interaction):
     """Kuyruğu karıştır"""
-    player = get_music_player(interaction.guild.id)
+    player = get_music_player(interaction.guild.id, interaction.channel)
     await player.shuffle_queue(interaction)
 
 @tree.command(name='help', description='Tüm komutlar hakkında bilgi göster')
@@ -452,6 +517,9 @@ async def help_command(interaction: discord.Interaction):
             "`/resume` - Müziği devam ettir\n"
             "`/queue` - Kuyruğu göster\n"
             "`/nowplaying` - Şu an çalan şarkıyı göster\n"
+            "`/seek position:<1:30/+15/-10>` - Şarkıda belirli bir yere atla\n"
+            "`/loop [mode:kapalı/şarkı/kuyruk]` - Şarkıyı ya da kuyruğu tekrarla\n"
+            "`/filter effect:<filtre>` - Bassboost, nightcore, slowed + reverb, 8D\n"
             "`/volume [vol:<0-100>]` - Ses seviyesini ayarla\n"
             "`/remove position:<sıra>` - Kuyruktan şarkı kaldır\n"
             "`/clear` - Kuyruğu temizle\n"
@@ -555,7 +623,7 @@ async def playlist_command(interaction: discord.Interaction, action: str, name: 
     elif action == 'info':
         await playlist_manager.show_playlist_info(interaction, name)
     elif action == 'play':
-        await playlist_manager.play_playlist(interaction, name, get_music_player(interaction.guild.id))
+        await playlist_manager.play_playlist(interaction, name, get_music_player(interaction.guild.id, interaction.channel))
     elif action == 'delete':
         await playlist_manager.delete_playlist(interaction, name)
     else:
@@ -600,6 +668,8 @@ if __name__ == '__main__':
 
     @bot.event
     async def setup_hook():
+        # Bot yeniden başlasa da eski "Şimdi çalıyor" kartlarındaki butonlar yanıt versin
+        bot.add_view(NowPlayingView(get_music_player))
         mode = Config.web_http_mode()
         if mode == 'off':
             print("ℹ️ Web/health HTTP kapalı (WEB_UI_TOKEN veya ENABLE_HEALTH_SERVER yok)", flush=True)

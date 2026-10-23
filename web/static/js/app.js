@@ -23,6 +23,11 @@
     playBtn: document.getElementById("play-btn"),
     playerNowTitle: document.getElementById("player-now-title"),
     playerNowMeta: document.getElementById("player-now-meta"),
+    playerNowImg: document.getElementById("player-now-img"),
+    seek: document.getElementById("seek"),
+    seekPos: document.getElementById("seek-pos"),
+    seekDur: document.getElementById("seek-dur"),
+    filterSelect: document.getElementById("filter-select"),
     queueList: document.getElementById("queue-list"),
     queueEmpty: document.getElementById("queue-empty"),
     queueCount: document.getElementById("queue-count"),
@@ -56,6 +61,7 @@
     btnShuffle: document.getElementById("btn-shuffle"),
     btnClear: document.getElementById("btn-clear"),
     btnAutoplay: document.getElementById("btn-autoplay"),
+    btnLoop: document.getElementById("btn-loop"),
     vol: document.getElementById("vol"),
     volLabel: document.getElementById("vol-label"),
     toast: document.getElementById("toast"),
@@ -70,6 +76,20 @@
   let toastTimer = null;
   let queueDragActive = false;
   let queueDragStartOrder = "";
+  // Son gelen konum; aradaki süre tarayıcıda ilerletilir
+  let playback = { position: 0, duration: 0, speed: 1, running: false, at: 0 };
+  let seekHold = false;
+
+  const LOOP_TITLES = { off: "Döngü: kapalı", song: "Döngü: şarkı", queue: "Döngü: kuyruk" };
+  const LOOP_NEXT = { off: "song", song: "queue", queue: "off" };
+
+  function formatTime(sec) {
+    sec = Math.max(0, Math.floor(sec || 0));
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = String(sec % 60).padStart(2, "0");
+    return h ? h + ":" + String(m).padStart(2, "0") + ":" + s : m + ":" + s;
+  }
 
   function parseError(data, fallback) {
     if (!data) return fallback || "İstek başarısız";
@@ -280,6 +300,37 @@
     el.btnPause.disabled = !playing || paused;
     el.btnResume.disabled = !paused;
     el.btnAutoplay.setAttribute("aria-pressed", status.autoplay ? "true" : "false");
+    const loop = status.loop || "off";
+    el.btnLoop.dataset.mode = loop;
+    el.btnLoop.textContent = loop === "song" ? "🔂" : "🔁";
+    el.btnLoop.title = LOOP_TITLES[loop] || LOOP_TITLES.off;
+    el.btnLoop.setAttribute("aria-pressed", loop !== "off" ? "true" : "false");
+    if (document.activeElement !== el.filterSelect) {
+      el.filterSelect.value = status.filter || "off";
+    }
+    playback.running = playing && !paused && !status.is_loading;
+  }
+
+  function renderPlayback() {
+    let pos = playback.position;
+    if (playback.running) pos += ((Date.now() - playback.at) / 1000) * playback.speed;
+    if (playback.duration) pos = Math.min(pos, playback.duration);
+    el.seekPos.textContent = formatTime(pos);
+    el.seekDur.textContent = playback.duration ? formatTime(playback.duration) : "—";
+    if (!seekHold) {
+      el.seek.max = String(playback.duration || 0);
+      el.seek.value = String(Math.floor(pos));
+    }
+  }
+
+  function setNowArt(url) {
+    if (url && /^https?:\/\//.test(url)) {
+      if (el.playerNowImg.getAttribute("src") !== url) el.playerNowImg.src = url;
+      el.playerNowImg.hidden = false;
+    } else {
+      el.playerNowImg.hidden = true;
+      el.playerNowImg.removeAttribute("src");
+    }
   }
 
   function applyNow(now) {
@@ -288,8 +339,19 @@
       el.npSub.textContent = "—";
       el.playerNowTitle.textContent = "Çalmıyor";
       el.playerNowMeta.textContent = "—";
+      setNowArt(null);
+      playback = { position: 0, duration: 0, speed: 1, running: false, at: Date.now() };
+      el.seek.disabled = true;
+      renderPlayback();
       return;
     }
+    setNowArt(now.thumbnail);
+    playback.position = now.position || 0;
+    playback.duration = now.duration || 0;
+    playback.speed = now.speed || 1;
+    playback.at = Date.now();
+    el.seek.disabled = !playback.duration;
+    renderPlayback();
     const src = now.is_stream ? "Stream" : "Yerel";
     const user = now.user || "—";
     el.npTitle.textContent = now.name;
@@ -635,6 +697,44 @@
     }
   });
 
+  async function postAndApply(path, body) {
+    try {
+      applySnapshot(await api(path, { method: "POST", body: JSON.stringify(body) }));
+      return true;
+    } catch (err) {
+      if (err.status === 401) {
+        showLogin();
+      } else {
+        toastError(err);
+      }
+      return false;
+    }
+  }
+
+  el.btnLoop.addEventListener("click", async function () {
+    const mode = LOOP_NEXT[el.btnLoop.dataset.mode || "off"];
+    if (await postAndApply("/api/loop", { mode: mode })) {
+      showToast(LOOP_TITLES[mode], true);
+    }
+  });
+
+  el.filterSelect.addEventListener("change", function () {
+    postAndApply("/api/filter", { name: el.filterSelect.value });
+  });
+
+  // Sürüklerken canlı güncelleme konumu geri almasın; bırakınca atla
+  el.seek.addEventListener("input", function () {
+    seekHold = true;
+    el.seekPos.textContent = formatTime(Number(el.seek.value));
+  });
+  el.seek.addEventListener("change", async function () {
+    await postAndApply("/api/seek", { position: Number(el.seek.value) });
+    seekHold = false;
+    renderPlayback();
+  });
+
+  setInterval(renderPlayback, 500);
+
   function sendVolume(vol) {
     api("/api/volume", {
       method: "POST",
@@ -823,7 +923,13 @@
       return ytmRow(item.thumbnail, item.title, meta, [
         ytmButton("+ Ekle", "btn-green", function (b) {
           ytmAdd(b, "/api/queue/add", {
-            tracks: [{ video_id: item.video_id, title: item.title, artists: item.artists }],
+            tracks: [{
+              video_id: item.video_id,
+              title: item.title,
+              artists: item.artists,
+              duration: item.duration || "",
+              thumbnail: item.thumbnail || "",
+            }],
           });
         }),
       ]);

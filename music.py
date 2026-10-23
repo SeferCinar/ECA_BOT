@@ -4,17 +4,106 @@ import asyncio
 from collections import deque
 import os
 import re
+import select
+import subprocess
+import time
+from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 _VIDEO_ID_RE = re.compile(
     r"(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|embed/)|youtu\.be/)([A-Za-z0-9_-]{11})"
 )
 
+# Ses filtreleri (FFmpeg -af): ad -> (etiket, filtre zinciri, hız çarpanı)
+AUDIO_FILTERS = {
+    'bassboost': ('Bass Boost', 'bass=g=8:f=110:w=0.6,alimiter=limit=0.95', 1.0),
+    'nightcore': ('Nightcore', 'aresample=48000,asetrate=60000,aresample=48000', 1.25),
+    'slowed': ('Slowed + Reverb', 'aresample=48000,asetrate=38400,aresample=48000,aecho=0.8:0.65:60|120:0.4|0.25', 0.8),
+    '8d': ('8D', 'aformat=channel_layouts=stereo,apulsator=hz=0.125', 1.0),
+}
+
+LOOP_MODES = {'off': 'Kapalı', 'song': 'Şarkı', 'queue': 'Kuyruk'}
+
 
 def video_id_from_url(url):
     """YouTube / YouTube Music linkinden video ID'si (bulunamazsa None)."""
     match = _VIDEO_ID_RE.search(url or "")
     return match.group(1) if match else None
+
+
+def format_time(seconds):
+    """90 -> '1:30', 3723 -> '1:02:03'."""
+    hours, rest = divmod(max(0, int(seconds)), 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
+def parse_time(text):
+    """'1:30' / '90' / '1:02:03' -> saniye. Geçersizse ValueError."""
+    parts = (text or "").strip().split(":")
+    if len(parts) > 3 or not all(p.isdigit() for p in parts):
+        raise ValueError(f"geçersiz süre: {text!r}")
+    seconds = 0
+    for part in parts:
+        seconds = seconds * 60 + int(part)
+    return seconds
+
+
+def parse_seek(text, current):
+    """'1:30' mutlak konum; '+15' / '-1:00' çalan konuma göre ileri/geri."""
+    text = (text or "").strip()
+    if text.startswith(("+", "-")):
+        delta = parse_time(text[1:])
+        return max(0, current + delta if text[0] == "+" else current - delta)
+    return parse_time(text)
+
+
+def _seconds_or_none(text):
+    try:
+        return parse_time(text)
+    except ValueError:
+        return None
+
+
+def song_thumbnail(song):
+    """Şarkının kapak resmi (http/https); yoksa YouTube video ID'sinden türetilir."""
+    thumbnail = song.get('thumbnail') or ''
+    if thumbnail.startswith(('https://', 'http://')):
+        return thumbnail
+    video_id = video_id_from_url(song.get('webpage_url'))
+    return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else None
+
+
+def _stream_url_expiring(url, margin=600):
+    """googlevideo adresleri 'expire' parametresindeki zamanda (~6 saat) geçersizleşir."""
+    try:
+        expire = int(parse_qs(urlparse(url or '').query).get('expire', ['0'])[0])
+    except ValueError:
+        return False
+    return expire > 0 and expire - time.time() < margin
+
+
+def _probe_duration(path):
+    """Yerel dosyanın süresi (sn); ffprobe yoksa ya da okuyamazsa None."""
+    try:
+        result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', path],
+            capture_output=True, text=True, timeout=10,
+        )
+        return int(float(result.stdout.strip()))
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def _wait_for_audio(source, timeout=10):
+    """FFmpeg ilk sesi üretene kadar bekle (okumadan), kaynak değişince boşluk olmasın."""
+    stdout = getattr(source, '_stdout', None)
+    if stdout is None:
+        return
+    try:
+        select.select([stdout], [], [], timeout)
+    except (OSError, TypeError, ValueError):
+        pass  # select pipe desteklemiyorsa (Windows) beklemeden devam
 
 
 class WebUser:
@@ -36,6 +125,7 @@ AUTOPLAY_USER = WebUser(name="Autoplay")
 class MusicPlayer:
     AUTOPLAY_HISTORY = 100  # bu kadar son çalınan şarkı autoplay'de tekrar seçilmez
     AUTOPLAY_ATTEMPTS = 3  # stream alınamazsa denenecek aday sayısı
+    MIN_LOOP_SECONDS = 3  # bundan kısa sürede biten şarkı çalınamamış sayılır, döngüye alınmaz
 
     def __init__(self, bot, downloader=None):
         self.bot = bot
@@ -54,6 +144,42 @@ class MusicPlayer:
         self._epoch = 0  # stop/skip/cleanup/autoplay kapatma sırasında süren aramaları geçersiz kılar
         self._resolving_song = None  # stream adresi alınmakta olan şarkı
         self._start_task = None
+        self.loop_mode = 'off'  # LOOP_MODES anahtarı
+        self.filter = None  # AUDIO_FILTERS anahtarı
+        self.card = None  # now_playing.NowPlayingCard; bot.py bağlar
+        self._skipping = False
+        self._play_gen = 0  # her voice_client.play'de artar: seek beklerken şarkı değişti mi
+        self._play_offset = 0.0  # FFmpeg kaynağının şarkıda başladığı saniye
+        self._play_started = None  # time.monotonic(); None = şarkı henüz çalmaya başlamadı
+        self._paused_at = None
+
+    def _refresh_card(self):
+        if self.card is not None:
+            self.card.refresh()
+
+    @property
+    def is_loading(self):
+        return self._resolving_song is not None
+
+    def speed(self):
+        """Filtrenin çalma hızı (nightcore 1.25, slowed 0.8)."""
+        return AUDIO_FILTERS[self.filter][2] if self.filter else 1.0
+
+    def position(self):
+        """Çalan şarkıda kaçıncı saniyedeyiz (şarkının kendi zamanıyla)."""
+        if self._play_started is None:
+            return 0.0
+        now = self._paused_at if self._paused_at is not None else time.monotonic()
+        return self._play_offset + (now - self._play_started) * self.speed()
+
+    def _start_clock(self, offset):
+        self._play_offset = offset
+        self._play_started = time.monotonic()
+        self._paused_at = self._play_started if self.is_paused else None
+
+    def _stop_clock(self):
+        self._play_started = None
+        self._paused_at = None
 
     def set_voice_client(self, voice_client):
         """Store voice client for web path (no Interaction)."""
@@ -71,12 +197,17 @@ class MusicPlayer:
         """Mesaj gönder (hem interaction hem de ctx destekler). Web path: no-op."""
         if interaction is None:
             return None  # web path: no Discord reply
-        if hasattr(interaction, 'response') and not interaction.response.is_done():
-            return await interaction.response.send_message(message, ephemeral=ephemeral)
-        elif hasattr(interaction, 'followup'):
-            return await interaction.followup.send(message, ephemeral=ephemeral)
-        else:
-            return await interaction.send(message)
+        try:
+            if hasattr(interaction, 'response') and not interaction.response.is_done():
+                return await interaction.response.send_message(message, ephemeral=ephemeral)
+            elif hasattr(interaction, 'followup'):
+                return await interaction.followup.send(message, ephemeral=ephemeral)
+            else:
+                return await interaction.send(message)
+        except discord.HTTPException as e:
+            # Interaction token'ı 15 dk sonra geçersizleşir; mesaj gitmedi diye çalma durmasın
+            print(f"⚠️ Mesaj gönderilemedi: {e}", flush=True)
+            return None
 
     def _ensure_queue_id(self, song):
         song.setdefault("queue_id", uuid4().hex)
@@ -88,12 +219,14 @@ class MusicPlayer:
         if len(by_id) != len(current) or len(queue_ids) != len(current) or set(queue_ids) != set(by_id):
             raise ValueError("invalid queue order")
         self.queue = deque(by_id[queue_id] for queue_id in queue_ids)
+        self._refresh_card()
 
     def remove_from_queue(self, queue_id: str):
         """Kuyruktan queue_id ile şarkı çıkar. Returns removed song or None."""
         for index, song in enumerate(self.queue):
             if self._ensure_queue_id(song) == queue_id:
                 del self.queue[index]
+                self._refresh_card()
                 return song
         return None
 
@@ -111,6 +244,7 @@ class MusicPlayer:
             return None
         song = self.queue[position - 1]
         del self.queue[position - 1]
+        self._refresh_card()
         await self._send_message(interaction, f"🗑️ **{song['name']}** kuyruktan kaldırıldı!")
         return song
 
@@ -126,17 +260,25 @@ class MusicPlayer:
                 "is_stream": bool(s.get("is_stream", False)),
                 "user": user_label,
                 "webpage_url": s.get("webpage_url") or "",
+                "duration": s.get("duration") or None,
+                "thumbnail": song_thumbnail(s),
             }
             if include_queue_id:
                 result["queue_id"] = self._ensure_queue_id(s)
             return result
+        current = song_dict(self.current)
+        if current is not None:
+            current["position"] = round(self.position(), 1)
+            current["speed"] = self.speed()
         return {
-            "current": song_dict(self.current),
+            "current": current,
             "queue": [song_dict(s, include_queue_id=True) for s in list(self.queue)],
             "volume": self.get_volume(),
             "is_playing": self.is_playing,
             "is_paused": self.is_paused,
             "autoplay": self.autoplay,
+            "loop": self.loop_mode,
+            "filter": self.filter,
             "is_loading": self._resolving_song is not None,
         }
     
@@ -152,10 +294,12 @@ class MusicPlayer:
             'name': song_name,
             'user': user,
             'is_stream': False,
+            'duration': await asyncio.to_thread(_probe_duration, file_path),
         }
         self._ensure_queue_id(song)
         self.queue.append(song)
-        
+        self._refresh_card()
+
         await self._send_message(interaction, f"✅ **{song_name}** kuyruğa eklendi!")
         
         if not self.is_playing and not self.is_paused:
@@ -170,10 +314,13 @@ class MusicPlayer:
             'user': user,
             'is_stream': True,
             'webpage_url': stream_info.get('webpage_url', ''),
+            'duration': stream_info.get('duration') or None,
+            'thumbnail': stream_info.get('thumbnail') or '',
         }
         self._ensure_queue_id(song)
         self.queue.append(song)
-        
+        self._refresh_card()
+
         await self._send_message(interaction, f"✅ **{stream_info['title']}** kuyruğa eklendi! (🌐 Stream)")
         
         if not self.is_playing and not self.is_paused:
@@ -186,11 +333,14 @@ class MusicPlayer:
             return
 
         finished = self.current  # stop/cleanup sonrası None: o durumda autoplay devreye girmez
+        self._requeue_for_loop(finished)
+        self._stop_clock()
         if len(self.queue) == 0:
             self.is_playing = False
             self.current = None
             if self.autoplay and finished is not None and await self._autoplay_from(finished):
                 return
+            self._refresh_card()
             await self._send_message(interaction, "📭 Kuyruk boş!")
             return
 
@@ -214,6 +364,7 @@ class MusicPlayer:
 
         # Hızlı eklenen şarkılar: stream adresi çalma sırası gelince alınır
         if song.get('is_stream') and not song.get('stream_url'):
+            self._refresh_card()  # kartta "hazırlanıyor" görünsün
             ready = await self._resolve_stream(song)
             if ready is None:
                 return  # stop/skip/leave araya girdi
@@ -222,28 +373,7 @@ class MusicPlayer:
                 await self.play_next(interaction)
                 return
 
-        # Stream mi yoksa yerel dosya mı kontrol et
-        if self.current.get('is_stream', False):
-            # Stream için FFmpeg ayarları
-            ffmpeg_options = {
-                'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-                'options': '-vn'
-            }
-            source = discord.FFmpegPCMAudio(
-                self.current['stream_url'],
-                **ffmpeg_options
-            )
-            source_type = "🌐"
-        else:
-            # Yerel dosya için FFmpeg source
-            source = discord.FFmpegPCMAudio(
-                self.current['file'],
-                options='-vn'
-            )
-            source_type = "📁"
-        
-        # Volume ayarla
-        source = discord.PCMVolumeTransformer(source, volume=self.volume)
+        source = discord.PCMVolumeTransformer(self._make_source(song), volume=self.volume)
         
         # after-callback must not require a live Interaction; interaction may be None (web)
         def _after(err):
@@ -257,11 +387,107 @@ class MusicPlayer:
             )
 
         self.voice_client.play(source, after=_after)
+        self._play_gen += 1
+        self._start_clock(0.0)
         if self.is_paused:  # stream adresi alınırken duraklatıldıysa
             self.voice_client.pause()
+        self._refresh_card()
 
-        await self._send_message(interaction, f"{source_type} Şimdi çalıyor: **{self.current['name']}** (İsteyen: {self.current['user'].mention})")
-    
+    def _make_source(self, song, position=0.0):
+        """Şarkı için FFmpeg kaynağı: position saniyesinden başlar, seçili filtre uygulanır."""
+        before = []
+        if song.get('is_stream', False):
+            before.append('-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5')
+            path = song['stream_url']
+        else:
+            path = song['file']
+        if position > 0:
+            before.append(f'-ss {position:.2f}')
+        options = '-vn'
+        if self.filter:
+            options += f' -af {AUDIO_FILTERS[self.filter][1]}'
+        return discord.FFmpegPCMAudio(path, before_options=' '.join(before) or None, options=options)
+
+    def _requeue_for_loop(self, finished):
+        """Döngü açıksa biten şarkıyı kuyruğa geri koy (play_next başında çağrılır)."""
+        skipped, self._skipping = self._skipping, False
+        if finished is None or self.loop_mode == 'off':
+            return
+        # Hemen biten şarkı çalınamamıştır (bozuk adres vb.): döngüye alıp sonsuza dek deneme
+        played = self._play_started is not None and self.position() >= self.MIN_LOOP_SECONDS
+        if self.loop_mode == 'song' and played and not skipped:
+            self.queue.appendleft(finished)
+        elif self.loop_mode == 'queue' and (played or skipped):
+            self.queue.append(finished)
+        else:
+            return
+        if finished.get('webpage_url') and _stream_url_expiring(finished.get('stream_url')):
+            finished['stream_url'] = None  # çalma sırası gelince yenisi alınır
+
+    async def _restart_at(self, position):
+        """Çalan şarkıyı position'dan (seçili filtreyle) yeniden başlat, sıradakine geçmeden.
+
+        Kaynak voice_client.source ile değiştirilir; after-callback tetiklenmez.
+        """
+        song, vc, gen = self.current, self.voice_client, self._play_gen
+        if song is None or vc is None or self._play_started is None:
+            return False
+        source = self._make_source(song, position)
+        await asyncio.to_thread(_wait_for_audio, source)
+        if self._play_gen != gen or self.voice_client is not vc or not (vc.is_playing() or vc.is_paused()):
+            source.cleanup()  # beklerken şarkı bitti ya da değişti
+            return False
+        old = vc.source
+        vc.source = discord.PCMVolumeTransformer(source, volume=self.volume)
+        if self.is_paused:
+            vc.pause()  # kaynak değişimi oynatıcıyı devam ettirir
+        self._start_clock(position)
+        if old is not None:
+            # Oynatıcı thread'i eski kaynaktan son kareyi okuyor olabilir; hemen kapatma
+            asyncio.get_running_loop().call_later(1, old.cleanup)
+        self._refresh_card()
+        return True
+
+    async def seek(self, interaction, position):
+        """Çalan şarkıda position saniyesine atla. Returns True on success."""
+        if self.current is None or self._play_started is None:
+            await self._send_message(interaction, "❌ Şu anda hiçbir şarkı çalmıyor!", ephemeral=True)
+            return False
+        duration = self.current.get('duration')
+        if duration and position >= duration:
+            await self._send_message(interaction, f"❌ Şarkı {format_time(duration)} uzunluğunda!", ephemeral=True)
+            return False
+        if not await self._restart_at(max(0, position)):
+            await self._send_message(interaction, "❌ Atlanamadı, şarkı değişmiş olabilir.", ephemeral=True)
+            return False
+        await self._send_message(interaction, f"⏩ **{format_time(position)}** konumuna atlandı!")
+        return True
+
+    async def set_filter(self, interaction, name):
+        """Ses filtresini değiştir (None = kapalı); çalan şarkıya kaldığı yerden uygulanır."""
+        if name is not None and name not in AUDIO_FILTERS:
+            raise ValueError(f"unknown filter: {name}")
+        position = self.position()  # eski filtrenin hızıyla
+        self.filter = name
+        if self._play_started is not None:
+            await self._restart_at(position)
+        self._refresh_card()
+        label = AUDIO_FILTERS[name][0] if name else "Kapalı"
+        await self._send_message(interaction, f"🎛️ Filtre: **{label}**")
+
+    def set_loop(self, mode):
+        """Döngü modu: 'off', 'song' (şarkıyı tekrarla) ya da 'queue' (kuyruğu tekrarla)."""
+        if mode not in LOOP_MODES:
+            raise ValueError(f"unknown loop mode: {mode}")
+        self.loop_mode = mode
+        self._refresh_card()
+
+    def cycle_loop(self):
+        """kapalı -> şarkı -> kuyruk -> kapalı. Returns the new mode."""
+        modes = list(LOOP_MODES)
+        self.set_loop(modes[(modes.index(self.loop_mode) + 1) % len(modes)])
+        return self.loop_mode
+
     async def _resolve_stream(self, song):
         """Kuyruktaki şarkının stream adresini al.
 
@@ -284,12 +510,14 @@ class MusicPlayer:
         if not info:
             return False
         song['stream_url'] = info['url']
+        song['duration'] = info.get('duration') or song.get('duration')
+        song['thumbnail'] = song.get('thumbnail') or info.get('thumbnail') or ''
         return True
 
     def enqueue_tracks(self, tracks, user):
         """Şarkıları stream adresini almadan kuyruğa ekle (adres çalma sırası gelince alınır).
 
-        tracks: [{video_id, title, artists?}]. Returns the queued song dicts.
+        tracks: [{video_id, title, artists?, duration?, thumbnail?}]. Returns the queued song dicts.
         """
         added = []
         for t in tracks:
@@ -300,10 +528,13 @@ class MusicPlayer:
                 'is_stream': True,
                 'stream_url': None,
                 'webpage_url': f"https://www.youtube.com/watch?v={t['video_id']}",
+                'duration': _seconds_or_none(t.get('duration')),  # YT Music: "3:45"
+                'thumbnail': t.get('thumbnail') or '',
             }
             self._ensure_queue_id(song)
             self.queue.append(song)
             added.append(song)
+        self._refresh_card()
         return added
 
     def start_if_idle(self):
@@ -320,6 +551,7 @@ class MusicPlayer:
         if not self.autoplay:
             self._epoch += 1
             self._autoplay_pool = []
+        self._refresh_card()
 
     def _next_autoplay_candidate(self):
         """Havuzdan daha önce çalınmamış ilk şarkıyı çıkar."""
@@ -378,6 +610,8 @@ class MusicPlayer:
             'user': AUTOPLAY_USER,
             'is_stream': True,
             'webpage_url': info.get('webpage_url', ''),
+            'duration': info.get('duration') or None,
+            'thumbnail': info.get('thumbnail') or '',
             'autoplay': True,
         }
         self._ensure_queue_id(song)
@@ -390,7 +624,10 @@ class MusicPlayer:
         if not self.is_playing:
             await self._send_message(interaction, "❌ Şu anda hiçbir şarkı çalmıyor!")
             return
-        
+
+        self._skipping = True  # döngü: şarkı modunda geçilen şarkı tekrar çalınmasın
+        # Duraklatılmışken geçilirse sıradaki çalsın; play_next duraklatılmışken bir şey yapmaz
+        self.is_paused = False
         if self._resolving_song is not None:
             # Stream adresi alınırken VC'de çalan bir şey yok: o şarkıyı bırak, sıradakine geç.
             # Beklemeden başlat; Discord yanıtı 3 sn içinde gitmeli.
@@ -418,6 +655,8 @@ class MusicPlayer:
         self.is_playing = False
         self.is_paused = False
         self.current = None
+        self._stop_clock()
+        self._refresh_card()
         await self._send_message(interaction, "⏹️ Müzik durduruldu ve kuyruk temizlendi!")
     
     async def pause(self, interaction):
@@ -432,8 +671,11 @@ class MusicPlayer:
         
         if self.voice_client:
             self.voice_client.pause()
-        
+
         self.is_paused = True
+        if self._play_started is not None:
+            self._paused_at = time.monotonic()
+        self._refresh_card()
         await self._send_message(interaction, "⏸️ Müzik duraklatıldı!")
     
     async def resume(self, interaction):
@@ -444,8 +686,12 @@ class MusicPlayer:
         
         if self.voice_client:
             self.voice_client.resume()
-        
+
         self.is_paused = False
+        if self._paused_at is not None:
+            self._play_started += time.monotonic() - self._paused_at
+            self._paused_at = None
+        self._refresh_card()
         await self._send_message(interaction, "▶️ Müzik devam ediyor!")
     
     async def show_queue(self, interaction):
@@ -468,19 +714,6 @@ class MusicPlayer:
         
         await self._send_message(interaction, "\n".join(queue_list))
     
-    async def now_playing(self, interaction):
-        """Şu an çalan şarkıyı göster"""
-        if self.current is None:
-            await self._send_message(interaction, "❌ Şu anda hiçbir şarkı çalmıyor!")
-            return
-        
-        status = "⏸️ Duraklatıldı" if self.is_paused else "▶️ Çalıyor"
-        await self._send_message(interaction,
-            f"{status}\n"
-            f"🎵 **{self.current['name']}**\n"
-            f"👤 İsteyen: {self.current['user'].mention}"
-        )
-    
     def get_volume(self):
         """Mevcut ses seviyesini al"""
         return int(self.volume * 100)
@@ -490,11 +723,13 @@ class MusicPlayer:
         self.volume = volume
         if self.voice_client and self.voice_client.source:
             self.voice_client.source.volume = volume
-    
+        self._refresh_card()
+
     async def clear_queue(self, interaction):
         """Kuyruğu temizle"""
         count = len(self.queue)
         self.queue.clear()
+        self._refresh_card()
         await self._send_message(interaction, f"🗑️ Kuyruktan {count} şarkı silindi!")
     
     async def shuffle_queue(self, interaction):
@@ -507,6 +742,7 @@ class MusicPlayer:
         queue_list = list(self.queue)
         random.shuffle(queue_list)
         self.queue = deque(queue_list)
+        self._refresh_card()
         await self._send_message(interaction, "🔀 Kuyruk karıştırıldı!")
     
     def cleanup(self):
@@ -519,3 +755,5 @@ class MusicPlayer:
         self.is_playing = False
         self.is_paused = False
         self.current = None
+        self._stop_clock()
+        self._refresh_card()

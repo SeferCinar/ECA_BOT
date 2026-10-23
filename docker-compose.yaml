@@ -39,6 +39,8 @@ services:
       - AUTO_LEAVE_CHANNEL_ID=${AUTO_LEAVE_CHANNEL_ID:-}
       # Mesaj metni; {channel} = ses kanalı adı, {minutes} = süre (dk). Boşsa varsayılan mesaj
       - AUTO_LEAVE_MESSAGE=${AUTO_LEAVE_MESSAGE:-}
+      # "Şimdi çalıyor" kartının atılacağı text kanalı (boşsa son müzik komutunun yazıldığı kanal)
+      - NOW_PLAYING_CHANNEL_ID=${NOW_PLAYING_CHANNEL_ID:-}
     network_mode: "service:warp"
     depends_on:
       warp:

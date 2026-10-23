@@ -301,17 +301,21 @@ def test_queue_add_validates_video_ids():
     assert client.post("/api/queue/add", json={"tracks": [{"video_id": "BSTsnWoslP4"}]}).status_code == 401
     assert client.post("/api/queue/add", headers=auth, json={"tracks": [{"video_id": "bad id"}]}).status_code == 422
     assert client.post("/api/queue/add", headers=auth, json={"tracks": []}).status_code == 422
+    bad_thumb = {"tracks": [{"video_id": "BSTsnWoslP4", "thumbnail": "javascript:alert(1)"}]}
+    assert client.post("/api/queue/add", headers=auth, json=bad_thumb).status_code == 422
 
     response = client.post(
         "/api/queue/add",
         headers=auth,
-        json={"tracks": [{"video_id": "BSTsnWoslP4", "title": "Bohemian Rhapsody", "artists": "Queen"}],
+        json={"tracks": [{"video_id": "BSTsnWoslP4", "title": "Bohemian Rhapsody", "artists": "Queen",
+                          "duration": "5:55", "thumbnail": "https://lh3.googleusercontent.com/x"}],
               "requested_by": "YT Music"},
     )
 
     assert response.status_code == 200
     service.add_tracks.assert_awaited_once_with(
-        [{"video_id": "BSTsnWoslP4", "title": "Bohemian Rhapsody", "artists": "Queen"}], "YT Music", None
+        [{"video_id": "BSTsnWoslP4", "title": "Bohemian Rhapsody", "artists": "Queen",
+          "duration": "5:55", "thumbnail": "https://lh3.googleusercontent.com/x"}], "YT Music", None
     )
 
 
@@ -324,3 +328,23 @@ def test_ytm_search_endpoint_maps_service_errors():
 
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "YTM_UNAVAILABLE"
+
+
+def test_seek_loop_filter_routes():
+    service = MusicService(FakeBot(), lambda gid: FakePlayer(), None, None, "1")
+    service.seek = AsyncMock(return_value={"ok": "seek"})
+    service.set_loop = AsyncMock(return_value={"ok": "loop"})
+    service.set_filter = AsyncMock(return_value={"ok": "filter"})
+    client = _app_with(service)
+    auth = {"Authorization": "Bearer t"}
+
+    assert client.post("/api/seek", json={"position": 10}).status_code == 401
+    assert client.post("/api/seek", headers=auth, json={"position": -1}).status_code == 422
+    assert client.post("/api/seek", headers=auth, json={"position": 90.5}).json() == {"ok": "seek"}
+    service.seek.assert_awaited_once_with(90.5, None)
+
+    assert client.post("/api/loop", headers=auth, json={"mode": "song"}).json() == {"ok": "loop"}
+    service.set_loop.assert_awaited_once_with("song", None)
+
+    assert client.post("/api/filter", headers=auth, json={"name": "8d"}).json() == {"ok": "filter"}
+    service.set_filter.assert_awaited_once_with("8d", None)

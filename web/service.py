@@ -78,6 +78,8 @@ class MusicService:
             "is_playing": player.is_playing,
             "is_paused": player.is_paused,
             "autoplay": bool(getattr(player, "autoplay", False)),
+            "loop": getattr(player, "loop_mode", "off"),
+            "filter": getattr(player, "filter", None),
             "is_loading": getattr(player, "_resolving_song", None) is not None,
         }
 
@@ -133,6 +135,33 @@ class MusicService:
     async def set_autoplay(self, enabled: bool, guild_id: Optional[str] = None) -> dict:
         player, _ = self._player(guild_id)
         player.set_autoplay(enabled)
+        return self.state_snapshot(guild_id)
+
+    async def seek(self, position: float, guild_id: Optional[str] = None) -> dict:
+        player, _ = self._player(guild_id)
+        if player.current is None or player.is_loading:
+            raise ServiceError("Nothing playing", "INVALID_STATE", 409)
+        duration = player.current.get("duration")
+        if position < 0 or (duration and position >= duration):
+            raise ServiceError("position out of range", "INVALID_POSITION", 400)
+        if not await player.seek(None, position):
+            raise ServiceError("Seek failed", "SEEK_FAILED", 409)
+        return self.state_snapshot(guild_id)
+
+    async def set_loop(self, mode: str, guild_id: Optional[str] = None) -> dict:
+        player, _ = self._player(guild_id)
+        try:
+            player.set_loop(mode)
+        except ValueError:
+            raise ServiceError("mode must be off, song or queue", "INVALID_LOOP", 400)
+        return self.state_snapshot(guild_id)
+
+    async def set_filter(self, name: Optional[str], guild_id: Optional[str] = None) -> dict:
+        player, _ = self._player(guild_id)
+        try:
+            await player.set_filter(None, None if name in (None, "", "off") else name)
+        except ValueError:
+            raise ServiceError("Unknown filter", "INVALID_FILTER", 400)
         return self.state_snapshot(guild_id)
 
     def list_voice_channels(self, guild_id: Optional[str] = None) -> list:
