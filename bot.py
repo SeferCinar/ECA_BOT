@@ -31,6 +31,7 @@ def get_music_player(guild_id, channel=None):
     """
     if guild_id not in music_players:
         player = MusicPlayer(bot, downloader)
+        player.crossfade = Config.CROSSFADE_SECONDS
         player.card = NowPlayingCard(player, Config.NOW_PLAYING_CHANNEL_ID, guild_id)
         music_players[guild_id] = player
     player = music_players[guild_id]
@@ -419,6 +420,18 @@ async def loop_command(interaction: discord.Interaction, mode: Optional[app_comm
         player.set_loop(mode.value)
     await interaction.response.send_message(LOOP_REPLIES[player.loop_mode])
 
+@tree.command(name='crossfade', description='Şarkılar arası geçiş: biten şarkı kısılırken sıradaki yükselir')
+@app_commands.describe(seconds='Geçiş süresi, saniye (0 = kapalı). Boş bırakırsan mevcut değeri gösterir')
+async def crossfade(interaction: discord.Interaction, seconds: Optional[app_commands.Range[int, 0, MusicPlayer.MAX_CROSSFADE]] = None):
+    """Şarkı geçişi süresini ayarla"""
+    player = get_music_player(interaction.guild.id, interaction.channel)
+    if seconds is not None:
+        player.set_crossfade(seconds)
+    if player.crossfade:
+        await interaction.response.send_message(f"🌊 Şarkı geçişi: **{player.crossfade} sn**")
+    else:
+        await interaction.response.send_message("➡️ Şarkı geçişi kapalı, şarkılar arka arkaya çalar.")
+
 @tree.command(name='filter', description='Ses filtresi: bassboost, nightcore, slowed + reverb, 8D')
 @app_commands.describe(effect='Uygulanacak filtre (çalan şarkıya kaldığı yerden uygulanır)')
 @app_commands.choices(effect=[app_commands.Choice(name='kapalı', value='off')] + [
@@ -520,6 +533,7 @@ async def help_command(interaction: discord.Interaction):
             "`/seek position:<1:30/+15/-10>` - Şarkıda belirli bir yere atla\n"
             "`/loop [mode:kapalı/şarkı/kuyruk]` - Şarkıyı ya da kuyruğu tekrarla\n"
             "`/filter effect:<filtre>` - Bassboost, nightcore, slowed + reverb, 8D\n"
+            "`/crossfade [seconds:<0-12>]` - Şarkılar arası geçiş süresi (0 = kapalı)\n"
             "`/volume [vol:<0-100>]` - Ses seviyesini ayarla\n"
             "`/remove position:<sıra>` - Kuyruktan şarkı kaldır\n"
             "`/clear` - Kuyruğu temizle\n"

@@ -28,6 +28,8 @@
     seekPos: document.getElementById("seek-pos"),
     seekDur: document.getElementById("seek-dur"),
     filterSelect: document.getElementById("filter-select"),
+    crossfade: document.getElementById("crossfade"),
+    crossfadeLabel: document.getElementById("crossfade-label"),
     queueList: document.getElementById("queue-list"),
     queueEmpty: document.getElementById("queue-empty"),
     queueCount: document.getElementById("queue-count"),
@@ -307,6 +309,10 @@
     el.btnLoop.setAttribute("aria-pressed", loop !== "off" ? "true" : "false");
     if (document.activeElement !== el.filterSelect) {
       el.filterSelect.value = status.filter || "off";
+    }
+    if (typeof status.crossfade === "number" && document.activeElement !== el.crossfade) {
+      el.crossfade.value = String(status.crossfade);
+      el.crossfadeLabel.textContent = crossfadeText(status.crossfade);
     }
     playback.running = playing && !paused && !status.is_loading;
   }
@@ -720,6 +726,17 @@
 
   el.filterSelect.addEventListener("change", function () {
     postAndApply("/api/filter", { name: el.filterSelect.value });
+  });
+
+  function crossfadeText(sec) {
+    return sec > 0 ? sec + " sn" : "Kapalı";
+  }
+
+  el.crossfade.addEventListener("input", function () {
+    el.crossfadeLabel.textContent = crossfadeText(Number(el.crossfade.value));
+  });
+  el.crossfade.addEventListener("change", function () {
+    postAndApply("/api/crossfade", { seconds: Number(el.crossfade.value) });
   });
 
   // Sürüklerken canlı güncelleme konumu geri almasın; bırakınca atla

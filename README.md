@@ -20,6 +20,7 @@ Kişisel sunucunuz için geliştirilmiş Discord müzik botu. Yerel müzik dosya
 - 🔁 Döngü modu: çalan şarkıyı ya da tüm kuyruğu tekrarla (`/loop`)
 - ⏩ Şarkıda istenen yere atlama (`/seek 1:30`, `+15`, `-10`) ve web panelinde kaydırılabilir ilerleme çubuğu
 - 🎛️ Ses filtreleri: bassboost, nightcore, slowed + reverb, 8D (`/filter`) — çalan şarkıya kaldığı yerden uygulanır
+- 🌊 Şarkılar arası geçiş (crossfade): biten şarkı kısılırken sıradaki yükselir, arada boşluk olmaz; kuyruk bitince autoplay şarkısına da geçiş yapılır (`/crossfade`, `CROSSFADE_SECONDS`, varsayılan 6 sn)
 - 🎧 Web panelinde **YT Music** sekmesi: ana sayfa önerileri, şarkı/albüm/playlist arama, tek tıkla kuyruğa ekleme
 - 🧩 YouTube Music'te şarkıları tek tıkla kuyruğa ekleyen tarayıcı eklentisi (bkz. [eca-ytm-extension](https://github.com/OmerEmreBozkurt/eca-ytm-extension))
 - ⚡ Discord slash komutları desteği
@@ -213,6 +214,7 @@ Coolify'da cookie dosyasını yüklemek için iki yöntem var:
 Coolify'da environment variables ayarlayın:
 - `DISCORD_TOKEN`: Discord bot token'ınız
 - `YOUTUBE_COOKIES_FILE`: `/app/cookies/cookies.txt` (opsiyonel, otomatik algılanır)
+- `CROSSFADE_SECONDS`: Şarkılar arası geçiş süresi, saniye (opsiyonel; varsayılan 6, 0 = kapalı, en fazla 12)
 - `NOW_PLAYING_CHANNEL_ID`: "Şimdi çalıyor" kartının atılacağı text kanalının ID'si (opsiyonel; boşsa son müzik komutunun yazıldığı kanal kullanılır)
 
 ### 3.5. Coolify Healthcheck / Port Sorunu (Önemli)
@@ -309,6 +311,7 @@ Bot artık Discord'un slash komut sistemini kullanıyor! Discord'da `/` yazdığ
 - `/seek position:<konum>` - Şarkıda belirli bir yere atla (`1:30`, `90`, `+15` ileri, `-10` geri)
 - `/loop [mode:kapalı/şarkı/kuyruk]` - Döngü modu (boş bırakılırsa sırayla değişir)
 - `/filter effect:<filtre>` - Ses filtresi: kapalı, Bass Boost, Nightcore, Slowed + Reverb, 8D
+- `/crossfade [seconds:<0-12>]` - Şarkılar arası geçiş süresi (0 = kapalı; boş bırakılırsa mevcut değeri gösterir)
 - `/volume [vol:<0-100>]` - Ses seviyesini ayarla
 - `/remove position:<sıra>` - Kuyruktan şarkı kaldır (`/queue` listesindeki numara)
 - `/clear` - Kuyruğu temizle

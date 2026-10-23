@@ -41,6 +41,8 @@ services:
       - AUTO_LEAVE_MESSAGE=${AUTO_LEAVE_MESSAGE:-}
       # "Şimdi çalıyor" kartının atılacağı text kanalı (boşsa son müzik komutunun yazıldığı kanal)
       - NOW_PLAYING_CHANNEL_ID=${NOW_PLAYING_CHANNEL_ID:-}
+      # Şarkılar arası geçiş süresi, sn (0 = kapalı, en fazla 12)
+      - CROSSFADE_SECONDS=${CROSSFADE_SECONDS:-6}
     network_mode: "service:warp"
     depends_on:
       warp:

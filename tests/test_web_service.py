@@ -528,6 +528,13 @@ async def test_seek_loop_and_filter_round_trip():
         snap = await svc.set_filter("off")
         assert snap["status"]["filter"] is None
 
+        snap = await svc.set_crossfade(8)
+        assert snap["status"]["crossfade"] == 8
+        with pytest.raises(ServiceError) as exc:
+            await svc.set_crossfade(20)
+        assert exc.value.code == "INVALID_CROSSFADE"
+        await player.stop(None)
+
 
 @pytest.mark.asyncio
 async def test_seek_and_filter_reject_bad_input():

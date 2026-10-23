@@ -703,6 +703,13 @@ select:focus {
   width: auto;
 }
 
+#crossfade {
+  width: 110px;
+  max-width: 30vw;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 /* —— Sticky player bar —— */
 .player-bar {
   position: fixed;

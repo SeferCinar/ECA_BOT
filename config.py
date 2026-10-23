@@ -41,6 +41,12 @@ class Config:
     # Mesaj metni; {channel} = ses kanalı adı, {minutes} = bekleme süresi (dk)
     AUTO_LEAVE_MESSAGE = os.getenv('AUTO_LEAVE_MESSAGE', '').strip()
 
+    # Şarkılar arası geçiş (crossfade) süresi, sn (0 = kapalı, en fazla 12); /crossfade ile değişir
+    try:
+        CROSSFADE_SECONDS = min(12, max(0, int(os.getenv('CROSSFADE_SECONDS', '6').strip() or '6')))
+    except ValueError:
+        CROSSFADE_SECONDS = 6
+
     # "Şimdi çalıyor" kartının atılacağı text kanalı (boşsa son müzik komutunun yazıldığı kanal)
     NOW_PLAYING_CHANNEL_ID = os.getenv('NOW_PLAYING_CHANNEL_ID', '').strip() or None
 

@@ -348,3 +348,15 @@ def test_seek_loop_filter_routes():
 
     assert client.post("/api/filter", headers=auth, json={"name": "8d"}).json() == {"ok": "filter"}
     service.set_filter.assert_awaited_once_with("8d", None)
+
+
+def test_crossfade_route_validates_range():
+    service = MusicService(FakeBot(), lambda gid: FakePlayer(), None, None, "1")
+    service.set_crossfade = AsyncMock(return_value={"ok": "crossfade"})
+    client = _app_with(service)
+    auth = {"Authorization": "Bearer t"}
+
+    assert client.post("/api/crossfade", headers=auth, json={"seconds": 13}).status_code == 422
+    assert client.post("/api/crossfade", headers=auth, json={"seconds": -1}).status_code == 422
+    assert client.post("/api/crossfade", headers=auth, json={"seconds": 8}).json() == {"ok": "crossfade"}
+    service.set_crossfade.assert_awaited_once_with(8, None)

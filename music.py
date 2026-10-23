@@ -10,6 +10,8 @@ import time
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
+from mixer import CrossfadeMixer
+
 _VIDEO_ID_RE = re.compile(
     r"(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|embed/)|youtu\.be/)([A-Za-z0-9_-]{11})"
 )
@@ -126,6 +128,11 @@ class MusicPlayer:
     AUTOPLAY_HISTORY = 100  # bu kadar son çalınan şarkı autoplay'de tekrar seçilmez
     AUTOPLAY_ATTEMPTS = 3  # stream alınamazsa denenecek aday sayısı
     MIN_LOOP_SECONDS = 3  # bundan kısa sürede biten şarkı çalınamamış sayılır, döngüye alınmaz
+    MAX_CROSSFADE = 12  # sn
+    MIN_CROSSFADE_SONG = 30  # bundan kısa şarkılarda geçiş yapılmaz
+    PREFETCH_LEAD = 45  # geçişten bu kadar sn önce sıradakinin stream adresi alınır
+    CROSSFADE_LEAD = 3  # geçişten bu kadar sn önce sıradakinin FFmpeg'i başlatılır
+    WATCH_INTERVAL = 0.5
 
     def __init__(self, bot, downloader=None):
         self.bot = bot
@@ -141,17 +148,28 @@ class MusicPlayer:
         self.played_ids = deque(maxlen=self.AUTOPLAY_HISTORY)
         self._autoplay_pool = []
         self._autoplay_pending = False
+        self._autoplay_prep = None  # (seed şarkı, görev): geçiş için önceden aranan autoplay şarkısı
         self._epoch = 0  # stop/skip/cleanup/autoplay kapatma sırasında süren aramaları geçersiz kılar
         self._resolving_song = None  # stream adresi alınmakta olan şarkı
         self._start_task = None
         self.loop_mode = 'off'  # LOOP_MODES anahtarı
         self.filter = None  # AUDIO_FILTERS anahtarı
         self.card = None  # now_playing.NowPlayingCard; bot.py bağlar
+        self.crossfade = 0  # şarkı geçişi süresi (sn), 0 = kapalı; bot.py ayarlar
+        self._mixer = None  # çalan CrossfadeMixer
+        self._prefetching = None  # stream adresi önceden alınan sıradaki şarkı
+        self._tasks = set()
         self._skipping = False
-        self._play_gen = 0  # her voice_client.play'de artar: seek beklerken şarkı değişti mi
+        self._play_gen = 0  # her şarkı başlayınca artar: beklerken şarkı değişti mi
         self._play_offset = 0.0  # FFmpeg kaynağının şarkıda başladığı saniye
         self._play_started = None  # time.monotonic(); None = şarkı henüz çalmaya başlamadı
         self._paused_at = None
+
+    def _spawn(self, coro):
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)  # referans tutulmazsa görev yarıda çöpe gidebilir
+        task.add_done_callback(self._tasks.discard)
+        return task
 
     def _refresh_card(self):
         if self.card is not None:
@@ -279,6 +297,7 @@ class MusicPlayer:
             "autoplay": self.autoplay,
             "loop": self.loop_mode,
             "filter": self.filter,
+            "crossfade": self.crossfade,
             "is_loading": self._resolving_song is not None,
         }
     
@@ -345,12 +364,8 @@ class MusicPlayer:
             return
 
         song = self.queue.popleft()
-        self.current = song
-        self.is_playing = True
-        played_id = video_id_from_url(song.get('webpage_url'))
-        if played_id:
-            self.played_ids.append(played_id)
-        
+        self._set_current(song)
+
         voice_client = self._get_voice_client(interaction)
         if voice_client is None:
             # Don't drop the track or leave is_playing True without a client
@@ -373,8 +388,11 @@ class MusicPlayer:
                 await self.play_next(interaction)
                 return
 
-        source = discord.PCMVolumeTransformer(self._make_source(song), volume=self.volume)
-        
+        source = self._make_source(song)
+        if not await self._warm_up(song, source):
+            return  # stop/skip/leave araya girdi
+        mixer = CrossfadeMixer(source, volume=self.volume)
+
         # after-callback must not require a live Interaction; interaction may be None (web)
         def _after(err):
             if err is not None:
@@ -386,12 +404,147 @@ class MusicPlayer:
                 self.bot.loop,
             )
 
-        self.voice_client.play(source, after=_after)
-        self._play_gen += 1
-        self._start_clock(0.0)
+        self._mixer = mixer
+        self.voice_client.play(mixer, after=_after)
         if self.is_paused:  # stream adresi alınırken duraklatıldıysa
             self.voice_client.pause()
+        self._song_started()
+
+    def _set_current(self, song):
+        self.current = song
+        self.is_playing = True
+        played_id = video_id_from_url(song.get('webpage_url'))
+        if played_id:
+            self.played_ids.append(played_id)
+
+    def _song_started(self):
+        """Ses başladı (play ya da geçiş): konum saati, kart ve şarkı sonu takibi."""
+        self._play_gen += 1
+        self._prefetching = None
+        self._start_clock(0.0)
         self._refresh_card()
+        if self.crossfade > 0:
+            self._spawn(self._watch_song_end(self._play_gen))
+
+    async def _warm_up(self, song, source):
+        """FFmpeg ilk sesi verene kadar bekle; saat gerçek sesle başlasın, geçiş zamanı kaymasın.
+
+        Returns False if stop/skip/leave happened meanwhile (source is cleaned up).
+        """
+        epoch = self._epoch
+        self._resolving_song = song  # bu sırada skip gelirse bu şarkı bırakılır
+        try:
+            await asyncio.to_thread(_wait_for_audio, source)
+        finally:
+            if self._resolving_song is song:
+                self._resolving_song = None
+        if epoch != self._epoch or self.current is not song:
+            source.cleanup()
+            return False
+        return True
+
+    def _upcoming(self):
+        """Çalan şarkı bitince çalacak şarkı (döngü dahil); kuyruğu değiştirmez."""
+        if self.loop_mode == 'song' or (self.loop_mode == 'queue' and not self.queue):
+            return self.current
+        if self.queue:
+            return self.queue[0]
+        return self._prepared_autoplay_song() if self.autoplay else None
+
+    @staticmethod
+    def _ready(song):
+        """Şarkı beklemeden başlatılabilir mi (stream adresi alınmış ve taze)."""
+        if song is None:
+            return False
+        if not song.get('is_stream', False):
+            return bool(song.get('file'))
+        url = song.get('stream_url')
+        return bool(url) and not _stream_url_expiring(url)
+
+    def _remaining(self, duration):
+        """Çalan şarkının bitmesine kalan gerçek süre (filtrenin hızı dahil)."""
+        return (duration - self.position()) / self.speed()
+
+    async def _watch_song_end(self, gen):
+        """Şarkı bitmeye yaklaşınca sıradakini hazırla ve geçişi başlat.
+
+        Sıradaki hazır değilse (stream adresi alınamadı vb.) geçiş yapılmaz; şarkı bitince
+        play_next her zamanki gibi devam eder.
+        """
+        song = self.current
+        while True:
+            await asyncio.sleep(self.WATCH_INTERVAL)
+            if self._play_gen != gen or self.current is not song or self.crossfade <= 0:
+                return  # şarkı değişti, stop/leave ya da geçiş kapatıldı
+            duration = song.get('duration')
+            if not duration or duration < self.MIN_CROSSFADE_SONG:
+                return  # süre bilinmiyor (canlı yayın) ya da şarkı çok kısa
+            if self.is_paused:
+                continue
+            remaining = self._remaining(duration)
+            if remaining <= self.crossfade + self.PREFETCH_LEAD:
+                self._prefetch_upcoming()
+            if remaining <= self.crossfade + self.CROSSFADE_LEAD and self._ready(self._upcoming()):
+                await self._crossfade_to_next(gen, duration)
+                return
+
+    async def _crossfade_to_next(self, gen, duration):
+        """Sıradaki şarkıyı aynı oynatıcıda başlat: çalan kısılırken o yükselir."""
+        song, upcoming, mixer, vc = self.current, self._upcoming(), self._mixer, self.voice_client
+        source = self._make_source(upcoming)
+        await asyncio.to_thread(_wait_for_audio, source)
+
+        def unchanged():
+            return self._play_gen == gen and self.current is song
+
+        # FFmpeg hazır; geçişin başlama anını bekle
+        while unchanged() and (self.is_paused or self._remaining(duration) > self.crossfade):
+            await asyncio.sleep(0.1)
+        remaining = self._remaining(duration)
+        if (not unchanged() or self._mixer is not mixer or self.voice_client is not vc
+                or vc is None or not (vc.is_playing() or vc.is_paused())
+                or self._upcoming() is not upcoming or remaining < 1):
+            source.cleanup()  # bu sırada skip/stop/kuyruk değişikliği oldu ya da şarkı bitti
+            return
+        self._requeue_for_loop(self.current)
+        if self.queue:
+            self.queue.popleft()  # == upcoming
+        else:
+            self._autoplay_prep = None  # önceden bulunan autoplay şarkısı kullanıldı
+        self._set_current(upcoming)
+        mixer.crossfade(source, remaining)
+        self._song_started()
+
+    def _prefetch_upcoming(self):
+        """Sıradaki şarkının stream adresini önceden al ki geçiş anında hazır olsun."""
+        if not self.queue and self.loop_mode == 'off':
+            self._prepare_autoplay()  # kuyruk bitiyor: sıradaki autoplay'den gelecek
+            return
+        song = self._upcoming()
+        if (song is None or song is self._prefetching or self.downloader is None
+                or not song.get('webpage_url') or not song.get('is_stream') or self._ready(song)):
+            return
+        self._prefetching = song  # başarısız olursa bu şarkı için tekrar deneme
+        self._spawn(self._prefetch(song))
+
+    async def _prefetch(self, song):
+        try:
+            info = await self.downloader.get_stream_url(song['webpage_url'])
+        except Exception as e:
+            print(f"⚠️ Sıradaki şarkı hazırlanamadı ({song['name']}): {e}", flush=True)
+            return
+        if info and not self._ready(song):
+            self._apply_stream_info(song, info)
+
+    def set_crossfade(self, seconds):
+        """Şarkı geçişi süresi (sn); 0 = kapalı."""
+        seconds = int(seconds)
+        if not 0 <= seconds <= self.MAX_CROSSFADE:
+            raise ValueError(f"crossfade must be 0-{self.MAX_CROSSFADE}")
+        was_off = self.crossfade <= 0
+        self.crossfade = seconds
+        if seconds and was_off and self._play_started is not None:
+            self._spawn(self._watch_song_end(self._play_gen))  # çalan şarkı için de
 
     def _make_source(self, song, position=0.0):
         """Şarkı için FFmpeg kaynağı: position saniyesinden başlar, seçili filtre uygulanır."""
@@ -427,24 +580,18 @@ class MusicPlayer:
     async def _restart_at(self, position):
         """Çalan şarkıyı position'dan (seçili filtreyle) yeniden başlat, sıradakine geçmeden.
 
-        Kaynak voice_client.source ile değiştirilir; after-callback tetiklenmez.
+        Mikserdeki kaynak değiştirilir; oynatıcı durmaz, after-callback tetiklenmez.
         """
-        song, vc, gen = self.current, self.voice_client, self._play_gen
-        if song is None or vc is None or self._play_started is None:
+        song, vc, mixer, gen = self.current, self.voice_client, self._mixer, self._play_gen
+        if song is None or vc is None or mixer is None or self._play_started is None:
             return False
         source = self._make_source(song, position)
         await asyncio.to_thread(_wait_for_audio, source)
         if self._play_gen != gen or self.voice_client is not vc or not (vc.is_playing() or vc.is_paused()):
             source.cleanup()  # beklerken şarkı bitti ya da değişti
             return False
-        old = vc.source
-        vc.source = discord.PCMVolumeTransformer(source, volume=self.volume)
-        if self.is_paused:
-            vc.pause()  # kaynak değişimi oynatıcıyı devam ettirir
+        mixer.replace(source)
         self._start_clock(position)
-        if old is not None:
-            # Oynatıcı thread'i eski kaynaktan son kareyi okuyor olabilir; hemen kapatma
-            asyncio.get_running_loop().call_later(1, old.cleanup)
         self._refresh_card()
         return True
 
@@ -509,10 +656,14 @@ class MusicPlayer:
             return None
         if not info:
             return False
+        self._apply_stream_info(song, info)
+        return True
+
+    @staticmethod
+    def _apply_stream_info(song, info):
         song['stream_url'] = info['url']
         song['duration'] = info.get('duration') or song.get('duration')
         song['thumbnail'] = song.get('thumbnail') or info.get('thumbnail') or ''
-        return True
 
     def enqueue_tracks(self, tracks, user):
         """Şarkıları stream adresini almadan kuyruğa ekle (adres çalma sırası gelince alınır).
@@ -551,6 +702,7 @@ class MusicPlayer:
         if not self.autoplay:
             self._epoch += 1
             self._autoplay_pool = []
+            self._autoplay_prep = None
         self._refresh_card()
 
     def _next_autoplay_candidate(self):
@@ -561,20 +713,11 @@ class MusicPlayer:
                 return candidate
         return None
 
-    async def _autoplay_from(self, finished):
-        """Kuyruk bitince benzer bir şarkı ekleyip çal.
-
-        Returns True if handled (a song was queued, or the user acted meanwhile),
-        False if nothing could be found.
-        """
-        if self.downloader is None or self._autoplay_pending:
-            return self._autoplay_pending
+    async def _pick_autoplay_song(self, finished):
+        """finished'a benzer, daha önce çalınmamış ve stream adresi alınmış şarkı (bulunamazsa None)."""
         seed = video_id_from_url(finished.get('webpage_url')) or (self.played_ids[-1] if self.played_ids else None)
         if seed is None:
-            return False
-
-        epoch = self._epoch
-        self._autoplay_pending = True
+            return None
         info = None
         try:
             # Kullanıcının seçtiği şarkı bittiyse onun radyosunu baştan kur; autoplay
@@ -595,15 +738,8 @@ class MusicPlayer:
                     break
         except Exception as e:
             print(f"⚠️ Autoplay hatası: {e}", flush=True)
-        finally:
-            self._autoplay_pending = False
-
-        # Arama sürerken stop/leave/autoplay kapatma ya da yeni şarkı eklendiyse vazgeç
-        if epoch != self._epoch or not self.autoplay or self.is_playing or self.queue:
-            return True
         if not info:
-            return False
-
+            return None
         song = {
             'stream_url': info['url'],
             'name': info['title'],
@@ -615,6 +751,51 @@ class MusicPlayer:
             'autoplay': True,
         }
         self._ensure_queue_id(song)
+        return song
+
+    def _prepare_autoplay(self):
+        """Kuyruk boşken autoplay şarkısını çalan şarkı bitmeden bul, geçiş ona yapılabilsin.
+
+        Şarkı kuyruğa konmaz: bu arada kullanıcı şarkı eklerse önce o çalar.
+        """
+        seed = self.current
+        if (not self.autoplay or self.downloader is None or seed is None
+                or (self._autoplay_prep is not None and self._autoplay_prep[0] is seed)):
+            return
+        self._autoplay_prep = (seed, self._spawn(self._pick_autoplay_song(seed)))
+
+    def _prepared_autoplay_song(self):
+        """Çalan şarkı için önceden bulunmuş autoplay şarkısı (hazır değilse None)."""
+        prep = self._autoplay_prep
+        if prep is None or prep[0] is not self.current or not prep[1].done() or prep[1].cancelled():
+            return None
+        return prep[1].result()
+
+    async def _autoplay_from(self, finished):
+        """Kuyruk bitince benzer bir şarkı ekleyip çal.
+
+        Returns True if handled (a song was queued, or the user acted meanwhile),
+        False if nothing could be found.
+        """
+        if self.downloader is None or self._autoplay_pending:
+            return self._autoplay_pending
+
+        epoch = self._epoch
+        prep, self._autoplay_prep = self._autoplay_prep, None
+        self._autoplay_pending = True
+        try:
+            if prep is not None and prep[0] is finished:
+                song = await prep[1]  # geçiş için önceden arandı (bitmediyse sonucunu bekle)
+            else:
+                song = await self._pick_autoplay_song(finished)
+        finally:
+            self._autoplay_pending = False
+
+        # Arama sürerken stop/leave/autoplay kapatma ya da yeni şarkı eklendiyse vazgeç
+        if epoch != self._epoch or not self.autoplay or self.is_playing or self.queue:
+            return True
+        if song is None:
+            return False
         self.queue.append(song)
         await self.play_next(None)
         return True
@@ -648,6 +829,7 @@ class MusicPlayer:
             return
 
         self._epoch += 1  # süren autoplay aramasını iptal et
+        self._autoplay_prep = None
         self.queue.clear()
         if self.voice_client:
             self.voice_client.stop()
@@ -748,6 +930,7 @@ class MusicPlayer:
     def cleanup(self):
         """Temizlik — stop playback and clear voice client reference."""
         self._epoch += 1  # süren autoplay aramasını iptal et
+        self._autoplay_prep = None
         if self.voice_client:
             self.voice_client.stop()
         self.voice_client = None

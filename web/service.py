@@ -80,6 +80,7 @@ class MusicService:
             "autoplay": bool(getattr(player, "autoplay", False)),
             "loop": getattr(player, "loop_mode", "off"),
             "filter": getattr(player, "filter", None),
+            "crossfade": getattr(player, "crossfade", 0),
             "is_loading": getattr(player, "_resolving_song", None) is not None,
         }
 
@@ -154,6 +155,14 @@ class MusicService:
             player.set_loop(mode)
         except ValueError:
             raise ServiceError("mode must be off, song or queue", "INVALID_LOOP", 400)
+        return self.state_snapshot(guild_id)
+
+    async def set_crossfade(self, seconds: int, guild_id: Optional[str] = None) -> dict:
+        player, _ = self._player(guild_id)
+        try:
+            player.set_crossfade(seconds)
+        except ValueError as e:
+            raise ServiceError(str(e), "INVALID_CROSSFADE", 400)
         return self.state_snapshot(guild_id)
 
     async def set_filter(self, name: Optional[str], guild_id: Optional[str] = None) -> dict:

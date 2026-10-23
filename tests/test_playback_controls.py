@@ -1,5 +1,8 @@
-"""Seek, loop mode, audio filters and playback position (no real Discord voice / FFmpeg)."""
+"""Seek, loop mode, audio filters, crossfade and playback position (no real Discord voice / FFmpeg)."""
+import asyncio
+import threading
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
@@ -28,13 +31,24 @@ class Clock:
 @pytest.fixture
 def clock():
     c = Clock()
-    with patch("music.time.monotonic", c):
+    # Sadece music modülünün saati: asyncio'nun saati (sleep) gerçek kalmalı
+    with patch("music.time", SimpleNamespace(monotonic=c, time=time.time)):
         yield c
 
 
 @pytest.fixture(autouse=True)
 def ffmpeg():
-    with patch("discord.FFmpegPCMAudio") as ffmpeg, patch("discord.PCMVolumeTransformer"):
+    """Her çağrıda ayrı sahte kaynak; ffmpeg.sources sırayla hepsini tutar."""
+    with patch("discord.FFmpegPCMAudio") as ffmpeg:
+        ffmpeg.sources = []
+
+        def make(path, **kwargs):
+            source = MagicMock(name=f"ffmpeg({path})")
+            source.path, source.kwargs = path, kwargs
+            ffmpeg.sources.append(source)
+            return source
+
+        ffmpeg.side_effect = make
         yield ffmpeg
 
 
@@ -47,16 +61,28 @@ def song(name, stream_url=None, **extra):
     }
 
 
-async def playing(*songs):
+async def playing(*songs, crossfade=0):
     """Kuyruğa şarkıları koyup ilkini çalmaya başlat."""
     player = MusicPlayer(FakeBot())
+    player.crossfade = crossfade
+    player.WATCH_INTERVAL = 0.01
     vc = MagicMock()
     vc.is_playing.return_value = True
     vc.is_paused.return_value = False
+    vc.play.side_effect = lambda source, after=None: setattr(vc, "source", source)
     player.set_voice_client(vc)
     player.queue.extend(songs)
     await player.play_next(None)
     return player, vc
+
+
+async def until(condition, timeout=2.0):
+    """Arka plan görevleri (geçiş takibi) koşulu sağlayana kadar bekle."""
+    for _ in range(int(timeout / 0.01)):
+        if condition():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("condition not met in time")
 
 
 async def finish(player, seconds, clock):
@@ -191,13 +217,16 @@ def test_enqueue_tracks_keeps_ytm_duration_and_thumbnail():
 @pytest.mark.asyncio
 async def test_seek_swaps_source_without_advancing(clock, ffmpeg):
     player, vc = await playing(song("a", duration=200), song("b"))
-    old_source = vc.source
+    mixer = player._mixer
+    old_source = mixer._source
     clock.now += 10
 
     assert await player.seek(None, 90) is True
 
-    assert ffmpeg.call_args.kwargs["before_options"].endswith("-ss 90.00")
-    assert vc.source is not old_source
+    assert ffmpeg.sources[-1].kwargs["before_options"].endswith("-ss 90.00")
+    assert player._mixer is mixer
+    assert mixer._source is ffmpeg.sources[-1]
+    old_source.cleanup.assert_called_once()
     vc.stop.assert_not_called()
     vc.play.assert_called_once()  # sadece ilk şarkı başlarken
     assert player.current["name"] == "a"
@@ -208,11 +237,11 @@ async def test_seek_swaps_source_without_advancing(clock, ffmpeg):
 async def test_seek_keeps_pause(clock):
     player, vc = await playing(song("a", duration=200))
     await player.pause(None)
-    vc.pause.reset_mock()
 
     await player.seek(None, 30)
 
-    vc.pause.assert_called_once()
+    vc.resume.assert_not_called()  # oynatıcıya dokunulmaz, sadece mikserin kaynağı değişir
+    assert player.is_paused is True
     clock.now += 100
     assert player.position() == 30
 
@@ -220,11 +249,11 @@ async def test_seek_keeps_pause(clock):
 @pytest.mark.asyncio
 async def test_seek_rejects_past_end_and_idle(clock):
     player, vc = await playing(song("a", duration=200))
-    source = vc.source
+    source = player._mixer._source
     player._send_message = AsyncMock()
 
     assert await player.seek("i", 200) is False
-    assert vc.source is source
+    assert player._mixer._source is source
     player._send_message.assert_awaited_with("i", "❌ Şarkı 3:20 uzunluğunda!", ephemeral=True)
 
     idle = MusicPlayer(FakeBot())
@@ -234,17 +263,23 @@ async def test_seek_rejects_past_end_and_idle(clock):
 @pytest.mark.asyncio
 async def test_seek_gives_up_when_song_changed_while_ffmpeg_started(clock, ffmpeg):
     player, vc = await playing(song("a"), song("b"))
-    source = vc.source
+    real_to_thread = asyncio.to_thread
+    calls = 0
 
     async def song_ends_meanwhile(func, *args):
-        await player.play_next(None)  # şarkı kendiliğinden bitti
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await player.play_next(None)  # şarkı kendiliğinden bitti
+        return await real_to_thread(func, *args)
 
     with patch("music.asyncio.to_thread", song_ends_meanwhile):
         assert await player._restart_at(30) is False
 
     assert player.current["name"] == "b"
-    assert vc.source is source
-    ffmpeg.return_value.cleanup.assert_called()
+    seek_source = next(s for s in ffmpeg.sources if (s.kwargs["before_options"] or "").endswith("-ss 30.00"))
+    seek_source.cleanup.assert_called_once()
+    assert player._mixer._source is not seek_source
 
 
 # ----- filtre -----
@@ -391,3 +426,253 @@ async def test_player_notifies_card_on_changes(clock):
     await player.stop(None)
 
     assert player.card.refresh.call_count >= 5
+
+
+# ----- şarkı geçişi (crossfade) -----
+
+@pytest.mark.asyncio
+async def test_crossfade_starts_next_song_in_the_same_player(clock):
+    player, vc = await playing(song("a", duration=200), song("b", duration=180), crossfade=6)
+    mixer, first = player._mixer, player._mixer._source
+
+    clock.now += 195  # 5 sn kaldı
+    await until(lambda: player.current["name"] == "b")
+
+    vc.play.assert_called_once()  # oynatıcı durmadı, after-callback'e gerek kalmadı
+    assert player._mixer is mixer
+    assert mixer._outgoing is first
+    assert mixer._source.path == "https://stream/bbbbbbbbbbb"
+    assert mixer._steps == 5 * 50  # kalan süre kadar
+    assert player.position() == 0
+    assert len(player.queue) == 0
+    await player.stop(None)
+
+
+@pytest.mark.asyncio
+async def test_crossfade_waits_for_the_fade_point(clock):
+    """FFmpeg is started a few seconds early, but the fade begins at `crossfade` seconds left."""
+    player, _ = await playing(song("a", duration=200), song("b", duration=180), crossfade=6)
+
+    clock.now += 192  # 8 sn kaldı: hazırlık başlar, geçiş henüz değil
+    await until(lambda: len(player._tasks) and any(s.path.endswith("bbbbbbbbbbb") for s in music.discord.FFmpegPCMAudio.sources))
+    await asyncio.sleep(0.05)
+    assert player.current["name"] == "a"
+
+    clock.now += 2.5  # 5.5 sn kaldı
+    await until(lambda: player.current["name"] == "b")
+    assert player._mixer._steps == int(5.5 * 50)
+    await player.stop(None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode, expected_current, expected_queue", [
+    ("song", "a", ["b"]),
+    ("queue", "b", ["a"]),
+])
+async def test_crossfade_respects_loop_mode(clock, mode, expected_current, expected_queue):
+    player, _ = await playing(song("a", duration=200), song("b", duration=200), crossfade=6)
+    player.set_loop(mode)
+    first = player._mixer._source
+
+    clock.now += 196
+    await until(lambda: player._mixer._outgoing is first)
+
+    assert player.current["name"] == expected_current
+    assert [s["name"] for s in player.queue] == expected_queue
+    await player.stop(None)
+
+
+@pytest.mark.asyncio
+async def test_crossfade_prefetches_quick_added_song(clock):
+    player, _ = await playing(song("a", duration=200), crossfade=6)
+    player.downloader = MagicMock()
+    player.downloader.get_stream_url = AsyncMock(return_value={
+        "url": "https://stream/fresh", "title": "b", "duration": 150, "thumbnail": "https://img/b",
+    })
+    player.enqueue_tracks([{"video_id": "bbbbbbbbbbb", "title": "b"}], WebUser())
+
+    clock.now += 190  # 10 sn kaldı: adres önceden alınır
+    await until(lambda: player.queue[0]["stream_url"] == "https://stream/fresh")
+    assert player.current["name"] == "a"
+
+    clock.now += 4  # 6 sn kaldı: geçiş
+    await until(lambda: player.current["name"] == "b")
+    assert player._mixer._source.path == "https://stream/fresh"
+
+    player.downloader.get_stream_url.assert_awaited_once_with("https://www.youtube.com/watch?v=bbbbbbbbbbb")
+    assert player.current["duration"] == 150
+    await player.stop(None)
+
+
+@pytest.mark.asyncio
+async def test_crossfade_skipped_when_next_song_cannot_be_prepared(clock):
+    player, vc = await playing(song("a", duration=200), crossfade=6)
+    player.downloader = MagicMock()
+    player.downloader.get_stream_url = AsyncMock(side_effect=Exception("yt-dlp hatası"))
+    player.enqueue_tracks([{"video_id": "bbbbbbbbbbb", "title": "b"}], WebUser())
+
+    clock.now += 196
+    await asyncio.sleep(0.1)
+
+    assert player.current["name"] == "a"  # şarkı bitince play_next her zamanki gibi devam eder
+    player.downloader.get_stream_url.assert_awaited_once()  # her turda yeniden denenmez
+    assert player._mixer._outgoing is None
+    await player.stop(None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("duration", [None, 20])
+async def test_no_crossfade_for_unknown_or_short_songs(clock, duration):
+    player, _ = await playing(song("a", duration=duration), song("b", duration=200), crossfade=6)
+
+    clock.now += 18
+    await asyncio.sleep(0.1)
+
+    assert player.current["name"] == "a"
+    assert not player._tasks  # takip bitti
+
+
+@pytest.mark.asyncio
+async def test_stop_during_crossfade_preparation_cleans_up(clock, ffmpeg):
+    player, _ = await playing(song("a", duration=200), song("b", duration=200), crossfade=6)
+    started, release = threading.Event(), threading.Event()
+
+    def slow_ffmpeg_start(source, timeout=10):
+        started.set()
+        release.wait(2)
+
+    with patch("music._wait_for_audio", slow_ffmpeg_start):
+        clock.now += 196
+        await until(started.is_set)
+        await player.stop(None)
+        release.set()
+        await until(lambda: not player._tasks)
+
+    next_source = next(s for s in ffmpeg.sources if s.path.endswith("bbbbbbbbbbb"))
+    next_source.cleanup.assert_called_once()
+    assert player.current is None
+
+
+@pytest.mark.asyncio
+async def test_skip_while_first_song_starts_drops_it(clock):
+    player, _ = await playing()
+    started, release = threading.Event(), threading.Event()
+
+    def slow_ffmpeg_start(source, timeout=10):
+        started.set()
+        release.wait(2)
+
+    player.queue.extend([song("a"), song("b")])
+    with patch("music._wait_for_audio", slow_ffmpeg_start):
+        first = asyncio.create_task(player.play_next(None))
+        await until(started.is_set)
+        await player.skip(None)
+        release.set()
+        await first
+        await until(lambda: player.current is not None and player.current["name"] == "b" and player._play_started)
+
+    assert player.voice_client.play.call_count == 1  # "a" hiç çalmadı
+
+
+@pytest.mark.asyncio
+async def test_set_crossfade_validates_and_covers_current_song(clock):
+    player, _ = await playing(song("a", duration=200), song("b", duration=200))
+    with pytest.raises(ValueError):
+        player.set_crossfade(13)
+
+    player.set_crossfade(6)
+    assert player.snapshot()["crossfade"] == 6
+    clock.now += 196
+    await until(lambda: player.current["name"] == "b")
+    await player.stop(None)
+
+
+@pytest.mark.asyncio
+async def test_volume_goes_to_the_mixer(clock):
+    player, _ = await playing(song("a"))
+    await player.set_volume(None, 0.3)
+    assert player._mixer.volume == 0.3
+
+
+# ----- autoplay ile geçiş -----
+
+def autoplay_downloader(*related):
+    downloader = MagicMock()
+    downloader.get_related_videos = AsyncMock(return_value=[{"id": i, "title": i} for i in related])
+    downloader.get_stream_url = AsyncMock(side_effect=lambda url: {
+        "url": f"https://stream/{music.video_id_from_url(url)}", "title": f"Radyo {music.video_id_from_url(url)}",
+        "duration": 210, "webpage_url": url,
+    })
+    return downloader
+
+
+@pytest.mark.asyncio
+async def test_crossfade_into_autoplay_song_when_queue_runs_out(clock):
+    player, vc = await playing(song("a", duration=200), crossfade=6)
+    player.downloader = autoplay_downloader("radio000001")
+    player.set_autoplay(True)
+    first = player._mixer._source
+
+    clock.now += 160  # 40 sn kaldı: autoplay şarkısı önceden bulunur
+    await until(lambda: player._prepared_autoplay_song() is not None)
+    assert player.current["name"] == "a" and len(player.queue) == 0  # kuyruğa eklenmedi
+
+    clock.now += 35  # 5 sn kaldı: geçiş
+    await until(lambda: player.current["name"] == "Radyo radio000001")
+
+    assert player.current["autoplay"] is True
+    assert player._mixer._outgoing is first
+    vc.play.assert_called_once()
+    player.downloader.get_related_videos.assert_awaited_once_with("aaaaaaaaaaa")
+    assert player._autoplay_prep is None
+    await player.stop(None)
+
+
+@pytest.mark.asyncio
+async def test_user_song_added_after_autoplay_was_prepared_wins(clock):
+    player, _ = await playing(song("a", duration=200), crossfade=6)
+    player.downloader = autoplay_downloader("radio000001")
+    player.set_autoplay(True)
+
+    clock.now += 160
+    await until(lambda: player._prepared_autoplay_song() is not None)
+    player.queue.append(song("b", duration=180))
+
+    clock.now += 35
+    await until(lambda: player.current["name"] != "a")
+    assert player.current["name"] == "b"
+    await player.stop(None)
+
+
+@pytest.mark.asyncio
+async def test_song_ending_early_reuses_prepared_autoplay_song(clock):
+    """No crossfade happened (e.g. the song ended before the fade), but the search is not repeated."""
+    player, _ = await playing(song("a", duration=200), crossfade=6)
+    player.downloader = autoplay_downloader("radio000001", "radio000002")
+    player.set_autoplay(True)
+
+    clock.now += 160
+    await until(lambda: player._prepared_autoplay_song() is not None)
+    await player.play_next(None)  # şarkı süresinden önce bitti (after-callback)
+
+    assert player.current["name"] == "Radyo radio000001"
+    player.downloader.get_related_videos.assert_awaited_once()
+    player.downloader.get_stream_url.assert_awaited_once()
+    await player.stop(None)
+
+
+@pytest.mark.asyncio
+async def test_stop_or_autoplay_off_drops_prepared_song(clock):
+    player, _ = await playing(song("a", duration=200), crossfade=6)
+    player.downloader = autoplay_downloader("radio000001")
+    player.set_autoplay(True)
+    clock.now += 160
+    await until(lambda: player._prepared_autoplay_song() is not None)
+
+    player.set_autoplay(False)
+    assert player._upcoming() is None
+    clock.now += 35
+    await asyncio.sleep(0.1)
+    assert player.current["name"] == "a"  # geçiş yok; şarkı bitince kuyruk boş
+    await player.stop(None)
+    assert player._autoplay_prep is None

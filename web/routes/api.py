@@ -190,6 +190,19 @@ async def loop(body: LoopBody, request: Request):
         handle(e)
 
 
+class CrossfadeBody(BaseModel):
+    seconds: int = Field(ge=0, le=12)
+    guild_id: Optional[str] = None
+
+
+@router.post("/crossfade")
+async def crossfade(body: CrossfadeBody, request: Request):
+    try:
+        return await svc(request).set_crossfade(body.seconds, body.guild_id)
+    except ServiceError as e:
+        handle(e)
+
+
 class FilterBody(BaseModel):
     name: Optional[str] = None  # None / "off" = kapalı
     guild_id: Optional[str] = None
