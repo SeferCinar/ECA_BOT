@@ -43,6 +43,11 @@ services:
       - NOW_PLAYING_CHANNEL_ID=${NOW_PLAYING_CHANNEL_ID:-}
       # Şarkılar arası geçiş süresi, sn (0 = kapalı, en fazla 12)
       - CROSSFADE_SECONDS=${CROSSFADE_SECONDS:-6}
+      # Ses seviyesi eşitleme (0 = kapalı)
+      - AUDIO_NORMALIZE=${AUDIO_NORMALIZE:-1}
+      # Haftalık özet kanalı (boşsa NOW_PLAYING_CHANNEL_ID) ve saat dilimi
+      - STATS_CHANNEL_ID=${STATS_CHANNEL_ID:-}
+      - TIMEZONE=${TIMEZONE:-Europe/Istanbul}
     network_mode: "service:warp"
     depends_on:
       warp:
@@ -53,6 +58,8 @@ services:
       # Persist music and playlists
       - ./music:/app/music
       - ./playlists:/app/playlists
+      # İstatistik veritabanı (stats.db) deploy'lar arasında korunsun
+      - ./data:/app/data
       # Cookies directory
       - ./cookies:/app/cookies
       # YouTube cookies (optional - only if you have cookies.txt file)

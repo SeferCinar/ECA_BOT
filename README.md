@@ -20,6 +20,10 @@ Kişisel sunucunuz için geliştirilmiş Discord müzik botu. Yerel müzik dosya
 - 🔁 Döngü modu: çalan şarkıyı ya da tüm kuyruğu tekrarla (`/loop`)
 - ⏩ Şarkıda istenen yere atlama (`/seek 1:30`, `+15`, `-10`) ve web panelinde kaydırılabilir ilerleme çubuğu
 - 🎛️ Ses filtreleri: bassboost, nightcore, slowed + reverb, 8D (`/filter`) — çalan şarkıya kaldığı yerden uygulanır
+- ⏮️ Önceki şarkı: 5 sn'den fazla çaldıysa başa sarar, yoksa önceki şarkıya döner (`/previous`, kart ve web paneli)
+- 🔉 Ses seviyesi eşitleme: yüksek şarkılar kısılır, kısıklar açılır (`AUDIO_NORMALIZE`, varsayılan açık)
+- 🟢 Bot durumu: Discord'da botun profilinde çalan şarkı "dinliyor" olarak görünür
+- 📊 İstatistikler: en çok çalınanlar, en çok şarkı açanlar, en çok geçilenler, en yoğun saat (`/stats`); her pazar 21:00'de kanala haftalık özet (`STATS_CHANNEL_ID`). Veriler `data/stats.db` dosyasında (SQLite) tutulur
 - 🌊 Şarkılar arası geçiş (crossfade): biten şarkı kısılırken sıradaki yükselir, arada boşluk olmaz; kuyruk bitince autoplay şarkısına da geçiş yapılır (`/crossfade`, `CROSSFADE_SECONDS`, varsayılan 6 sn)
 - 🎧 Web panelinde **YT Music** sekmesi: ana sayfa önerileri, şarkı/albüm/playlist arama, tek tıkla kuyruğa ekleme
 - 🧩 YouTube Music'te şarkıları tek tıkla kuyruğa ekleyen tarayıcı eklentisi (bkz. [eca-ytm-extension](https://github.com/OmerEmreBozkurt/eca-ytm-extension))
@@ -214,6 +218,10 @@ Coolify'da cookie dosyasını yüklemek için iki yöntem var:
 Coolify'da environment variables ayarlayın:
 - `DISCORD_TOKEN`: Discord bot token'ınız
 - `YOUTUBE_COOKIES_FILE`: `/app/cookies/cookies.txt` (opsiyonel, otomatik algılanır)
+- `AUDIO_NORMALIZE`: Ses seviyesi eşitleme (opsiyonel; varsayılan açık, `0` = kapalı)
+- `STATS_CHANNEL_ID`: Haftalık özetin atılacağı text kanalı (opsiyonel; boşsa `NOW_PLAYING_CHANNEL_ID`)
+- `TIMEZONE`: Haftalık özet saati için saat dilimi (opsiyonel; varsayılan `Europe/Istanbul`)
+- İstatistikler `/app/data/stats.db` dosyasında tutulur; Coolify'da `/app/data` için kalıcı bir volume tanımlayın (docker-compose'da `./data:/app/data` hazır)
 - `CROSSFADE_SECONDS`: Şarkılar arası geçiş süresi, saniye (opsiyonel; varsayılan 6, 0 = kapalı, en fazla 12)
 - `NOW_PLAYING_CHANNEL_ID`: "Şimdi çalıyor" kartının atılacağı text kanalının ID'si (opsiyonel; boşsa son müzik komutunun yazıldığı kanal kullanılır)
 
@@ -303,6 +311,7 @@ Bot artık Discord'un slash komut sistemini kullanıyor! Discord'da `/` yazdığ
 - `/play query:<dosya/link>` - Müzik çal (yerel dosya veya YouTube linki)
 - `/search query:<arama> [choice:<numara>]` - YouTube'da şarkı ara ve seç (1-5 arası, choice opsiyonel)
 - `/skip` - Şarkıyı geç
+- `/previous` - Önceki şarkıya dön (5 sn'den fazla çaldıysa başa sarar)
 - `/stop` - Müziği durdur
 - `/pause` - Müziği duraklat
 - `/resume` - Müziği devam ettir
@@ -317,6 +326,7 @@ Bot artık Discord'un slash komut sistemini kullanıyor! Discord'da `/` yazdığ
 - `/clear` - Kuyruğu temizle
 - `/shuffle` - Kuyruğu karıştır
 - `/autoplay [state:aç/kapat]` - Kuyruk bitince benzer şarkılarla devam et
+- `/stats [period:son 7 gün/son 30 gün/tüm zamanlar]` - Dinleme istatistikleri
 - `/help` - Tüm komutlar hakkında bilgi göster
 - `/sync` - Slash komutlarını yeniden senkronize et (komutlar görünmüyorsa kullanın)
 

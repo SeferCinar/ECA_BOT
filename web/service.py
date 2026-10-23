@@ -114,6 +114,10 @@ class MusicService:
             if not player.is_playing:
                 raise ServiceError("Nothing playing", "INVALID_STATE", 409)
             await player.skip(None)
+        elif action == "previous":
+            if player.current is None and not player.history:
+                raise ServiceError("No previous song", "INVALID_STATE", 409)
+            await player.previous(None)
         elif action == "stop":
             await player.stop(None)
         elif action == "clear":

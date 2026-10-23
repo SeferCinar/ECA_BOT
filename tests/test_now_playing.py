@@ -231,7 +231,7 @@ async def test_view_reflects_state():
     assert str(view.loop_button.emoji) == "🔂"
     assert view.loop_button.style == discord.ButtonStyle.primary
     assert view.autoplay_button.style == discord.ButtonStyle.primary
-    assert {item.custom_id for item in view.children} == {"np:pause", "np:skip", "np:shuffle", "np:loop", "np:autoplay"}
+    assert {item.custom_id for item in view.children} == {"np:previous", "np:pause", "np:skip", "np:shuffle", "np:loop", "np:autoplay"}
 
 
 @pytest.mark.asyncio
@@ -271,3 +271,37 @@ async def test_view_reports_errors_only_to_clicker():
     i = interaction()
     await view.shuffle_button.callback(i)
     i.response.send_message.assert_awaited_once_with("❌ Karıştırmak için en az 2 şarkı olmalı!", ephemeral=True)
+
+
+def test_presence_text_shows_first_playing_song():
+    from now_playing import presence_text
+
+    idle, loading, playing, paused = (make_player() for _ in range(4))
+    loading.current, loading.is_playing, loading._resolving_song = song("x"), True, song("x")
+    playing.current, playing.is_playing = song("a"), True
+    paused.current, paused.is_playing, paused.is_paused = song("p"), True, True
+
+    assert presence_text([idle, loading, playing]) == "a"
+    assert presence_text([paused]) == "⏸ p"
+    assert presence_text([idle]) is None
+    playing.current = song("x" * 300)
+    assert len(presence_text([playing])) == 128
+
+
+@pytest.mark.asyncio
+async def test_previous_button():
+    player = make_player()
+    player.queue.extend([song("a"), song("b")])
+    await player.play_next(None)
+    await player.play_next(None)  # a bitti
+    view = NowPlayingView(lambda _: player)
+
+    await view.previous_button.callback(interaction())
+
+    player.voice_client.stop.assert_called_once()
+    assert [s["name"] for s in player.queue] == ["a", "b"]
+
+    empty = NowPlayingView(lambda _: make_player())
+    i = interaction()
+    await empty.previous_button.callback(i)
+    i.response.send_message.assert_awaited_once_with("❌ Önceki şarkı yok!", ephemeral=True)

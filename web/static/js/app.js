@@ -56,6 +56,7 @@
     libRefresh: document.getElementById("lib-refresh"),
     npTitle: document.getElementById("np-title"),
     npSub: document.getElementById("np-sub"),
+    btnPrevious: document.getElementById("btn-previous"),
     btnPause: document.getElementById("btn-pause"),
     btnResume: document.getElementById("btn-resume"),
     btnSkip: document.getElementById("btn-skip"),
@@ -679,6 +680,7 @@
     }
   }
 
+  el.btnPrevious.addEventListener("click", function () { control("previous"); });
   el.btnPause.addEventListener("click", function () { control("pause"); });
   el.btnResume.addEventListener("click", function () { control("resume"); });
   el.btnSkip.addEventListener("click", function () { control("skip"); });

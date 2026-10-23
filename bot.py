@@ -1,13 +1,17 @@
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
 import os
 from typing import Optional
 from music import AUDIO_FILTERS, MusicPlayer, format_time, parse_seek
-from now_playing import NowPlayingCard, NowPlayingView, build_embed
+from now_playing import NowPlayingCard, NowPlayingView, build_embed, presence_text
 from downloader import MusicDownloader
 from playlist import PlaylistManager
 from config import Config
+from stats import PlayStats, build_stats_embed, weekly_slot
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from voice_idle import VoiceIdleWatcher, format_leave_message, format_minutes
 
 # Bot intents ayarları
@@ -23,6 +27,8 @@ tree = bot.tree  # Slash komutları için
 music_players = {}
 downloader = MusicDownloader()
 playlist_manager = PlaylistManager()
+play_stats = PlayStats(os.path.join(Config.DATA_DIR, 'stats.db'))
+TZ = ZoneInfo(Config.TIMEZONE)
 
 def get_music_player(guild_id, channel=None):
     """Guild için müzik player'ı al veya oluştur.
@@ -32,12 +38,79 @@ def get_music_player(guild_id, channel=None):
     if guild_id not in music_players:
         player = MusicPlayer(bot, downloader)
         player.crossfade = Config.CROSSFADE_SECONDS
+        player.normalize = Config.AUDIO_NORMALIZE
         player.card = NowPlayingCard(player, Config.NOW_PLAYING_CHANNEL_ID, guild_id)
+        player.on_change = schedule_presence_update
+        player.on_song_end = lambda song, listened, reason: play_stats.record(guild_id, song, listened, reason)
         music_players[guild_id] = player
     player = music_players[guild_id]
     if channel is not None:
         player.card.fallback_channel = channel
     return player
+
+# ========== BOT DURUMU ("... dinliyor") ==========
+
+_presence = {"text": None, "task": None, "dirty": False}
+
+def schedule_presence_update():
+    """Çalan şarkı değişince bot durumunu güncelle; art arda gelen değişiklikler birleşir."""
+    _presence["dirty"] = True
+    if _presence["task"] is None or _presence["task"].done():
+        _presence["task"] = asyncio.create_task(_update_presence())
+
+async def _update_presence():
+    while _presence["dirty"]:
+        _presence["dirty"] = False
+        await asyncio.sleep(2)  # skip/geçiş sırasındaki ara durumlar görünmesin
+        text = presence_text(list(music_players.values()))
+        if text == _presence["text"]:
+            continue
+        activity = discord.Activity(type=discord.ActivityType.listening, name=text) if text else None
+        try:
+            await bot.change_presence(activity=activity)
+            _presence["text"] = text
+        except Exception as e:
+            print(f"⚠️ Bot durumu güncellenemedi: {e}", flush=True)
+
+# ========== HAFTALIK ÖZET ==========
+
+async def _stats_channel():
+    channel_id = Config.STATS_CHANNEL_ID or Config.NOW_PLAYING_CHANNEL_ID
+    if not channel_id:
+        return None
+    try:
+        return bot.get_channel(int(channel_id)) or await bot.fetch_channel(int(channel_id))
+    except (ValueError, discord.HTTPException) as e:
+        print(f"⚠️ Haftalık özet kanalı bulunamadı ({channel_id}): {e}", flush=True)
+        return None
+
+async def post_weekly_summary_if_due():
+    """Pazar 21:00 geçtiyse ve bu hafta atılmadıysa son 7 günün özetini at (bot kapalıydıysa açılınca)."""
+    channel = await _stats_channel()
+    if channel is None or getattr(channel, 'guild', None) is None:
+        return
+    slot = weekly_slot(datetime.now(TZ))
+    key = f"weekly_posted:{channel.guild.id}"
+    last = play_stats.get_meta(key)
+    if last is None:
+        play_stats.set_meta(key, slot.isoformat())  # ilk çalıştırma: geçmiş haftayı geç bildirme
+        return
+    if datetime.fromisoformat(last) >= slot:
+        return
+    since = slot - timedelta(days=7)
+    summary = await asyncio.to_thread(play_stats.summary, channel.guild.id, since.timestamp(), slot.timestamp(), TZ)
+    if summary["plays"]:
+        await channel.send(embed=build_stats_embed(summary, "📊 Haftalık özet"))
+    play_stats.set_meta(key, slot.isoformat())
+
+async def weekly_summary_loop():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            await post_weekly_summary_if_due()
+        except Exception as e:
+            print(f"⚠️ Haftalık özet atılamadı: {e}", flush=True)
+        await asyncio.sleep(600)
 
 # ========== BOŞ KANALDAN OTOMATİK AYRILMA ==========
 
@@ -345,6 +418,29 @@ async def skip(interaction: discord.Interaction):
     player = get_music_player(interaction.guild.id, interaction.channel)
     await player.skip(interaction)
 
+@tree.command(name='previous', description='Önceki şarkıya dön (5 sn\'den fazla çaldıysa başa sarar)')
+async def previous(interaction: discord.Interaction):
+    """Önceki şarkıya dön"""
+    player = get_music_player(interaction.guild.id, interaction.channel)
+    await player.previous(interaction)
+
+STATS_PERIODS = {'week': (7, "📊 Son 7 gün"), 'month': (30, "📊 Son 30 gün"), 'all': (None, "📊 Tüm zamanlar")}
+
+@tree.command(name='stats', description='Dinleme istatistikleri: en çok çalınanlar, en çok şarkı açanlar…')
+@app_commands.describe(period='Dönem (varsayılan: son 7 gün)')
+@app_commands.choices(period=[
+    app_commands.Choice(name='son 7 gün', value='week'),
+    app_commands.Choice(name='son 30 gün', value='month'),
+    app_commands.Choice(name='tüm zamanlar', value='all'),
+])
+async def stats_command(interaction: discord.Interaction, period: Optional[app_commands.Choice[str]] = None):
+    """Dinleme istatistiklerini göster"""
+    days, title = STATS_PERIODS[period.value if period else 'week']
+    now = datetime.now(TZ)
+    since = (now - timedelta(days=days)).timestamp() if days else 0
+    summary = await asyncio.to_thread(play_stats.summary, interaction.guild.id, since, now.timestamp(), TZ)
+    await interaction.response.send_message(embed=build_stats_embed(summary, title))
+
 @tree.command(name='stop', description='Müziği durdur')
 async def stop(interaction: discord.Interaction):
     """Müziği durdur"""
@@ -525,6 +621,7 @@ async def help_command(interaction: discord.Interaction):
             "`/play query:<dosya/link> [download:True]` - Yerel dosya veya link çal (varsayılan: stream)\n"
             "`/search query:<arama>` - YouTube'da ara ve stream et\n"
             "`/skip` - Şarkıyı geç\n"
+            "`/previous` - Önceki şarkıya dön (5 sn'den fazla çaldıysa başa sarar)\n"
             "`/stop` - Müziği durdur\n"
             "`/pause` - Müziği duraklat\n"
             "`/resume` - Müziği devam ettir\n"
@@ -538,7 +635,8 @@ async def help_command(interaction: discord.Interaction):
             "`/remove position:<sıra>` - Kuyruktan şarkı kaldır\n"
             "`/clear` - Kuyruğu temizle\n"
             "`/shuffle` - Kuyruğu karıştır\n"
-            "`/autoplay [state:aç/kapat]` - Kuyruk bitince benzer şarkılarla devam et"
+            "`/autoplay [state:aç/kapat]` - Kuyruk bitince benzer şarkılarla devam et\n"
+            "`/stats [period:<dönem>]` - Dinleme istatistikleri (her pazar 21:00'de haftalık özet)"
         ),
         inline=False
     )
@@ -684,6 +782,7 @@ if __name__ == '__main__':
     async def setup_hook():
         # Bot yeniden başlasa da eski "Şimdi çalıyor" kartlarındaki butonlar yanıt versin
         bot.add_view(NowPlayingView(get_music_player))
+        bot.loop.create_task(weekly_summary_loop())
         mode = Config.web_http_mode()
         if mode == 'off':
             print("ℹ️ Web/health HTTP kapalı (WEB_UI_TOKEN veya ENABLE_HEALTH_SERVER yok)", flush=True)

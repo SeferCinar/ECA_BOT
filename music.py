@@ -16,6 +16,10 @@ _VIDEO_ID_RE = re.compile(
     r"(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|embed/)|youtu\.be/)([A-Za-z0-9_-]{11})"
 )
 
+# Ses seviyesi eşitleme: yüksek şarkıları kısar, kısıkları açar (hedef RMS ~ -14 dBFS, en çok +12 dB).
+# Pencere ~15 sn olduğu için şarkı içindeki dinamik korunur; ileri bakış FFmpeg'de, gecikme eklemez.
+NORMALIZE_FILTER = 'dynaudnorm=f=500:g=31:p=0.95:m=4:r=0.2'
+
 # Ses filtreleri (FFmpeg -af): ad -> (etiket, filtre zinciri, hız çarpanı)
 AUDIO_FILTERS = {
     'bassboost': ('Bass Boost', 'bass=g=8:f=110:w=0.6,alimiter=limit=0.95', 1.0),
@@ -128,6 +132,8 @@ class MusicPlayer:
     AUTOPLAY_HISTORY = 100  # bu kadar son çalınan şarkı autoplay'de tekrar seçilmez
     AUTOPLAY_ATTEMPTS = 3  # stream alınamazsa denenecek aday sayısı
     MIN_LOOP_SECONDS = 3  # bundan kısa sürede biten şarkı çalınamamış sayılır, döngüye alınmaz
+    HISTORY_SIZE = 50
+    RESTART_SECONDS = 5  # ⏮: şarkı bundan uzun çaldıysa önce başa sarılır
     MAX_CROSSFADE = 12  # sn
     MIN_CROSSFADE_SONG = 30  # bundan kısa şarkılarda geçiş yapılmaz
     PREFETCH_LEAD = 45  # geçişten bu kadar sn önce sıradakinin stream adresi alınır
@@ -155,6 +161,11 @@ class MusicPlayer:
         self.loop_mode = 'off'  # LOOP_MODES anahtarı
         self.filter = None  # AUDIO_FILTERS anahtarı
         self.card = None  # now_playing.NowPlayingCard; bot.py bağlar
+        self.on_change = None  # () -> None; bot.py bot durumunu günceller
+        self.on_song_end = None  # (song, dinlenen sn, sebep) -> None; bot.py istatistiğe yazar
+        self.normalize = False  # ses seviyesi eşitleme (dynaudnorm); bot.py ayarlar
+        self.history = deque(maxlen=self.HISTORY_SIZE)  # çalınmış şarkılar (⏮ için)
+        self._going_back = False
         self.crossfade = 0  # şarkı geçişi süresi (sn), 0 = kapalı; bot.py ayarlar
         self._mixer = None  # çalan CrossfadeMixer
         self._prefetching = None  # stream adresi önceden alınan sıradaki şarkı
@@ -171,9 +182,12 @@ class MusicPlayer:
         task.add_done_callback(self._tasks.discard)
         return task
 
-    def _refresh_card(self):
+    def _changed(self):
+        """Çalan şarkı ya da ayarlar değişti: kartı ve dinleyenleri (bot durumu) güncelle."""
         if self.card is not None:
             self.card.refresh()
+        if self.on_change is not None:
+            self.on_change()
 
     @property
     def is_loading(self):
@@ -237,14 +251,14 @@ class MusicPlayer:
         if len(by_id) != len(current) or len(queue_ids) != len(current) or set(queue_ids) != set(by_id):
             raise ValueError("invalid queue order")
         self.queue = deque(by_id[queue_id] for queue_id in queue_ids)
-        self._refresh_card()
+        self._changed()
 
     def remove_from_queue(self, queue_id: str):
         """Kuyruktan queue_id ile şarkı çıkar. Returns removed song or None."""
         for index, song in enumerate(self.queue):
             if self._ensure_queue_id(song) == queue_id:
                 del self.queue[index]
-                self._refresh_card()
+                self._changed()
                 return song
         return None
 
@@ -262,7 +276,7 @@ class MusicPlayer:
             return None
         song = self.queue[position - 1]
         del self.queue[position - 1]
-        self._refresh_card()
+        self._changed()
         await self._send_message(interaction, f"🗑️ **{song['name']}** kuyruktan kaldırıldı!")
         return song
 
@@ -317,7 +331,7 @@ class MusicPlayer:
         }
         self._ensure_queue_id(song)
         self.queue.append(song)
-        self._refresh_card()
+        self._changed()
 
         await self._send_message(interaction, f"✅ **{song_name}** kuyruğa eklendi!")
         
@@ -338,7 +352,7 @@ class MusicPlayer:
         }
         self._ensure_queue_id(song)
         self.queue.append(song)
-        self._refresh_card()
+        self._changed()
 
         await self._send_message(interaction, f"✅ **{stream_info['title']}** kuyruğa eklendi! (🌐 Stream)")
         
@@ -352,14 +366,14 @@ class MusicPlayer:
             return
 
         finished = self.current  # stop/cleanup sonrası None: o durumda autoplay devreye girmez
-        self._requeue_for_loop(finished)
+        self._finish(finished)
         self._stop_clock()
         if len(self.queue) == 0:
             self.is_playing = False
             self.current = None
             if self.autoplay and finished is not None and await self._autoplay_from(finished):
                 return
-            self._refresh_card()
+            self._changed()
             await self._send_message(interaction, "📭 Kuyruk boş!")
             return
 
@@ -379,7 +393,7 @@ class MusicPlayer:
 
         # Hızlı eklenen şarkılar: stream adresi çalma sırası gelince alınır
         if song.get('is_stream') and not song.get('stream_url'):
-            self._refresh_card()  # kartta "hazırlanıyor" görünsün
+            self._changed()  # kartta "hazırlanıyor" görünsün
             ready = await self._resolve_stream(song)
             if ready is None:
                 return  # stop/skip/leave araya girdi
@@ -422,7 +436,7 @@ class MusicPlayer:
         self._play_gen += 1
         self._prefetching = None
         self._start_clock(0.0)
-        self._refresh_card()
+        self._changed()
         if self.crossfade > 0:
             self._spawn(self._watch_song_end(self._play_gen))
 
@@ -506,7 +520,7 @@ class MusicPlayer:
                 or self._upcoming() is not upcoming or remaining < 1):
             source.cleanup()  # bu sırada skip/stop/kuyruk değişikliği oldu ya da şarkı bitti
             return
-        self._requeue_for_loop(self.current)
+        self._finish(self.current)
         if self.queue:
             self.queue.popleft()  # == upcoming
         else:
@@ -556,15 +570,40 @@ class MusicPlayer:
             path = song['file']
         if position > 0:
             before.append(f'-ss {position:.2f}')
-        options = '-vn'
+        chain = [NORMALIZE_FILTER] if self.normalize else []
         if self.filter:
-            options += f' -af {AUDIO_FILTERS[self.filter][1]}'
+            chain.append(AUDIO_FILTERS[self.filter][1])
+        options = f"-vn -af {','.join(chain)}" if chain else '-vn'
         return discord.FFmpegPCMAudio(path, before_options=' '.join(before) or None, options=options)
 
-    def _requeue_for_loop(self, finished):
-        """Döngü açıksa biten şarkıyı kuyruğa geri koy (play_next başında çağrılır)."""
+    def _finish(self, finished):
+        """Biten/geçilen şarkı: istatistiğe ve geçmişe yaz, döngüdeyse kuyruğa geri koy.
+
+        play_next başında ve geçiş anında çağrılır.
+        """
         skipped, self._skipping = self._skipping, False
-        if finished is None or self.loop_mode == 'off':
+        going_back, self._going_back = self._going_back, False
+        if finished is None:
+            return
+        if self._play_started is not None:  # gerçekten çalmaya başlamıştı
+            self._record(finished, 'back' if going_back else 'skipped' if skipped else 'ended')
+            if not going_back and (not self.history or self.history[-1] is not finished):
+                self.history.append(finished)
+        if not going_back:  # ⏮: şarkılar kuyruğa elle konuldu
+            self._requeue_for_loop(finished, skipped)
+
+    def _record(self, song, reason):
+        """İstatistik için: reason 'ended' / 'skipped' / 'stopped' / 'back'."""
+        if self.on_song_end is None:
+            return
+        try:
+            self.on_song_end(song, self.position(), reason)
+        except Exception as e:
+            print(f"⚠️ İstatistik yazılamadı: {e}", flush=True)
+
+    def _requeue_for_loop(self, finished, skipped):
+        """Döngü açıksa biten şarkıyı kuyruğa geri koy."""
+        if self.loop_mode == 'off':
             return
         # Hemen biten şarkı çalınamamıştır (bozuk adres vb.): döngüye alıp sonsuza dek deneme
         played = self._play_started is not None and self.position() >= self.MIN_LOOP_SECONDS
@@ -592,7 +631,7 @@ class MusicPlayer:
             return False
         mixer.replace(source)
         self._start_clock(position)
-        self._refresh_card()
+        self._changed()
         return True
 
     async def seek(self, interaction, position):
@@ -618,7 +657,7 @@ class MusicPlayer:
         self.filter = name
         if self._play_started is not None:
             await self._restart_at(position)
-        self._refresh_card()
+        self._changed()
         label = AUDIO_FILTERS[name][0] if name else "Kapalı"
         await self._send_message(interaction, f"🎛️ Filtre: **{label}**")
 
@@ -627,7 +666,7 @@ class MusicPlayer:
         if mode not in LOOP_MODES:
             raise ValueError(f"unknown loop mode: {mode}")
         self.loop_mode = mode
-        self._refresh_card()
+        self._changed()
 
     def cycle_loop(self):
         """kapalı -> şarkı -> kuyruk -> kapalı. Returns the new mode."""
@@ -685,7 +724,7 @@ class MusicPlayer:
             self._ensure_queue_id(song)
             self.queue.append(song)
             added.append(song)
-        self._refresh_card()
+        self._changed()
         return added
 
     def start_if_idle(self):
@@ -703,7 +742,7 @@ class MusicPlayer:
             self._epoch += 1
             self._autoplay_pool = []
             self._autoplay_prep = None
-        self._refresh_card()
+        self._changed()
 
     def _next_autoplay_candidate(self):
         """Havuzdan daha önce çalınmamış ilk şarkıyı çıkar."""
@@ -807,6 +846,11 @@ class MusicPlayer:
             return
 
         self._skipping = True  # döngü: şarkı modunda geçilen şarkı tekrar çalınmasın
+        await self._advance(interaction)
+        await self._send_message(interaction, "⏭️ Şarkı geçildi!")
+
+    async def _advance(self, interaction):
+        """Çalan şarkıyı bırakıp kuyruktaki sıradakine geç (skip ve ⏮ için)."""
         # Duraklatılmışken geçilirse sıradaki çalsın; play_next duraklatılmışken bir şey yapmaz
         self.is_paused = False
         if self._resolving_song is not None:
@@ -819,9 +863,42 @@ class MusicPlayer:
             self.voice_client.stop()
         else:
             await self.play_next(interaction)
-        
-        await self._send_message(interaction, "⏭️ Şarkı geçildi!")
-    
+
+    async def previous(self, interaction):
+        """⏮: şarkı RESTART_SECONDS'tan uzun çaldıysa başa sar, yoksa önceki şarkıya dön.
+
+        Çalan şarkı kuyruğun başına geri konur; önceki bitince o devam eder.
+        Hiçbir şey çalmıyorsa son çalınan şarkıyı yeniden çalar.
+        """
+        while self.history and self.history[-1] is self.current:
+            self.history.pop()  # şarkı döngüsünde geçmişin sonu çalan şarkının kendisi
+        if self.current is not None and not self.is_loading and (
+            self.position() >= self.RESTART_SECONDS or not self.history
+        ):
+            if await self._restart_at(0):
+                await self._send_message(interaction, "⏮️ Şarkı başa sarıldı!")
+                return
+        if not self.history:
+            await self._send_message(interaction, "❌ Önceki şarkı yok!", ephemeral=True)
+            return
+
+        song = self.history.pop()
+        for i in range(len(self.queue) - 1, -1, -1):
+            if self.queue[i] is song:  # kuyruk döngüsü onu sona eklemişti; iki kez çalmasın
+                del self.queue[i]
+                break
+        if song.get('webpage_url') and _stream_url_expiring(song.get('stream_url')):
+            song['stream_url'] = None  # çalma sırası gelince yenisi alınır
+        if self.current is not None:
+            self.queue.appendleft(self.current)
+            self.queue.appendleft(song)
+            self._going_back = True
+            await self._advance(interaction)
+        else:
+            self.queue.appendleft(song)
+            await self.play_next(interaction)
+        await self._send_message(interaction, f"⏮️ Önceki şarkı: **{song['name']}**")
+
     async def stop(self, interaction):
         """Müziği durdur"""
         if not self.is_playing and not self.is_paused and not self._autoplay_pending:
@@ -830,6 +907,7 @@ class MusicPlayer:
 
         self._epoch += 1  # süren autoplay aramasını iptal et
         self._autoplay_prep = None
+        self._record_stopped()
         self.queue.clear()
         if self.voice_client:
             self.voice_client.stop()
@@ -838,7 +916,7 @@ class MusicPlayer:
         self.is_paused = False
         self.current = None
         self._stop_clock()
-        self._refresh_card()
+        self._changed()
         await self._send_message(interaction, "⏹️ Müzik durduruldu ve kuyruk temizlendi!")
     
     async def pause(self, interaction):
@@ -857,7 +935,7 @@ class MusicPlayer:
         self.is_paused = True
         if self._play_started is not None:
             self._paused_at = time.monotonic()
-        self._refresh_card()
+        self._changed()
         await self._send_message(interaction, "⏸️ Müzik duraklatıldı!")
     
     async def resume(self, interaction):
@@ -873,7 +951,7 @@ class MusicPlayer:
         if self._paused_at is not None:
             self._play_started += time.monotonic() - self._paused_at
             self._paused_at = None
-        self._refresh_card()
+        self._changed()
         await self._send_message(interaction, "▶️ Müzik devam ediyor!")
     
     async def show_queue(self, interaction):
@@ -905,13 +983,13 @@ class MusicPlayer:
         self.volume = volume
         if self.voice_client and self.voice_client.source:
             self.voice_client.source.volume = volume
-        self._refresh_card()
+        self._changed()
 
     async def clear_queue(self, interaction):
         """Kuyruğu temizle"""
         count = len(self.queue)
         self.queue.clear()
-        self._refresh_card()
+        self._changed()
         await self._send_message(interaction, f"🗑️ Kuyruktan {count} şarkı silindi!")
     
     async def shuffle_queue(self, interaction):
@@ -924,13 +1002,19 @@ class MusicPlayer:
         queue_list = list(self.queue)
         random.shuffle(queue_list)
         self.queue = deque(queue_list)
-        self._refresh_card()
+        self._changed()
         await self._send_message(interaction, "🔀 Kuyruk karıştırıldı!")
     
+    def _record_stopped(self):
+        if self.current is not None and self._play_started is not None:
+            self.history.append(self.current)
+            self._record(self.current, 'stopped')
+
     def cleanup(self):
         """Temizlik — stop playback and clear voice client reference."""
         self._epoch += 1  # süren autoplay aramasını iptal et
         self._autoplay_prep = None
+        self._record_stopped()
         if self.voice_client:
             self.voice_client.stop()
         self.voice_client = None
@@ -939,4 +1023,4 @@ class MusicPlayer:
         self.is_paused = False
         self.current = None
         self._stop_clock()
-        self._refresh_card()
+        self._changed()

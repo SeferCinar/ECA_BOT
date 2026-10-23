@@ -676,3 +676,120 @@ async def test_stop_or_autoplay_off_drops_prepared_song(clock):
     assert player.current["name"] == "a"  # geçiş yok; şarkı bitince kuyruk boş
     await player.stop(None)
     assert player._autoplay_prep is None
+
+
+# ----- önceki şarkı (⏮) -----
+
+@pytest.mark.asyncio
+async def test_previous_goes_back_and_current_follows(clock):
+    a, b, c = song("a"), song("b"), song("c")
+    player, vc = await playing(a, b, c)
+    await finish(player, 200, clock)  # a bitti, b çalıyor
+    clock.now += 2
+
+    await player.previous(None)
+    await player.play_next(None)  # vc.stop() sonrası after-callback
+
+    assert player.current is a
+    assert list(player.queue) == [b, c]
+    assert list(player.history) == []  # geri dönerken b geçmişe yazılmaz: ⏮ yine geriye gider
+
+
+@pytest.mark.asyncio
+async def test_previous_restarts_song_that_played_a_while(clock, ffmpeg):
+    player, vc = await playing(song("a"), song("b"))
+    await finish(player, 200, clock)
+    clock.now += 30
+
+    await player.previous(None)
+
+    assert player.current["name"] == "b"
+    assert player.position() == 0
+    vc.stop.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_previous_in_queue_loop_does_not_duplicate(clock):
+    a, b = song("a"), song("b")
+    player, _ = await playing(a, b)
+    player.set_loop("queue")
+    await finish(player, 200, clock)  # a sona eklendi: [a]
+    clock.now += 1
+
+    await player.previous(None)
+    await player.play_next(None)
+
+    assert player.current is a
+    assert list(player.queue) == [b]
+
+
+@pytest.mark.asyncio
+async def test_previous_when_idle_replays_last_song(clock):
+    a = song("a")
+    player, _ = await playing(a)
+    await finish(player, 200, clock)  # kuyruk bitti
+    assert player.current is None
+
+    await player.previous(None)
+
+    assert player.current is a
+
+
+@pytest.mark.asyncio
+async def test_previous_without_history():
+    player = MusicPlayer(FakeBot())
+    player._send_message = AsyncMock()
+    await player.previous("i")
+    player._send_message.assert_awaited_once_with("i", "❌ Önceki şarkı yok!", ephemeral=True)
+
+
+# ----- istatistik kaydı -----
+
+@pytest.mark.asyncio
+async def test_song_end_reasons_are_reported(clock):
+    a, b, c, d = song("a"), song("b"), song("c"), song("d")
+    player, _ = await playing(a, b, c, d)
+    ends = []
+    player.on_song_end = lambda s, listened, reason: ends.append((s["name"], round(listened), reason))
+
+    await finish(player, 200, clock)             # a sonuna kadar
+    clock.now += 4
+    await player.skip(None)
+    await player.play_next(None)                 # b geçildi
+    clock.now += 2
+    await player.previous(None)
+    await player.play_next(None)                 # c'den b'ye geri dönüldü
+    clock.now += 50
+    await player.stop(None)                      # b durduruldu
+
+    assert ends == [("a", 200, "ended"), ("b", 4, "skipped"), ("c", 2, "back"), ("b", 50, "stopped")]
+
+
+@pytest.mark.asyncio
+async def test_failing_stats_hook_does_not_break_playback(clock):
+    player, _ = await playing(song("a"), song("b"))
+    player.on_song_end = MagicMock(side_effect=Exception("disk dolu"))
+    await finish(player, 200, clock)
+    assert player.current["name"] == "b"
+
+
+@pytest.mark.asyncio
+async def test_on_change_fires_on_song_change(clock):
+    player, _ = await playing(song("a"), song("b"))
+    player.on_change = MagicMock()
+    await finish(player, 200, clock)
+    player.on_change.assert_called()
+
+
+# ----- ses seviyesi eşitleme -----
+
+def test_normalize_runs_before_effect_filter(ffmpeg):
+    player = MusicPlayer(FakeBot())
+    player.normalize = True
+    player._make_source(song("a"))
+    assert ffmpeg.call_args.kwargs["options"] == f"-vn -af {music.NORMALIZE_FILTER}"
+
+    player.filter = "nightcore"
+    player._make_source(song("a"))
+    assert ffmpeg.call_args.kwargs["options"] == f"-vn -af {music.NORMALIZE_FILTER},{AUDIO_FILTERS['nightcore'][1]}"
+    assert " " not in music.NORMALIZE_FILTER

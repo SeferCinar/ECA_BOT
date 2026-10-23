@@ -37,9 +37,10 @@ ytdlp-cache/
 # Cloudflare WARP device registration/key material
 warp-data/
 
-# Müzik dosyaları ve playlist'ler
+# Müzik dosyaları, playlist'ler ve istatistik veritabanı
 music/
 playlists/
+data/
 *.mp3
 *.wav
 *.ogg

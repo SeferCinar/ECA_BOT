@@ -558,3 +558,22 @@ async def test_seek_and_filter_reject_bad_input():
     with pytest.raises(ServiceError) as exc:
         await svc.set_filter("chipmunk")
     assert exc.value.code == "INVALID_FILTER"
+
+
+@pytest.mark.asyncio
+async def test_control_previous():
+    svc, player, patches = _playing_service()
+
+    with pytest.raises(ServiceError) as exc:
+        await svc.control("previous")  # hiç çalınmış şarkı yok
+    assert exc.value.code == "INVALID_STATE"
+
+    with patches[0], patches[1]:
+        player.set_voice_client(svc.bot.guilds[0].voice_client)
+        await player.play_next(None)
+        await player.play_next(None)  # şarkı bitti, kuyruk boş
+        assert player.current is None
+
+        snap = await svc.control("previous")
+        assert snap["now"]["name"] == "a"
+        await player.stop(None)

@@ -27,7 +27,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create music, playlists and cookies directories
-RUN mkdir -p /app/music /app/playlists /app/cookies
+RUN mkdir -p /app/music /app/playlists /app/cookies /app/data
 
 # Run the bot
 CMD ["python", "bot.py"]

@@ -74,6 +74,18 @@ def build_embed(player):
     return embed
 
 
+def presence_text(players):
+    """Bot durumunda ("... dinliyor") gösterilecek metin; çalan yoksa None.
+
+    Bot durumu tüm sunucular için tek; birden çok sunucuda çalıyorsa ilki gösterilir.
+    """
+    for player in players:
+        song = player.current
+        if song is not None and player.is_playing and not player.is_loading:
+            return _clip(("⏸ " if player.is_paused else "") + (song.get("name") or ""), 128)
+    return None
+
+
 def idle_embed():
     return discord.Embed(
         description="⏹️ Çalma bitti. `/play` ile yeni şarkı ekleyebilirsin.",
@@ -107,7 +119,15 @@ class NowPlayingView(discord.ui.View):
         else:
             await interaction.response.defer()
 
-    @discord.ui.button(emoji="⏯️", style=discord.ButtonStyle.secondary, custom_id="np:pause")
+    @discord.ui.button(emoji="⏮️", style=discord.ButtonStyle.secondary, custom_id="np:previous", row=0)
+    async def previous_button(self, interaction, button):
+        async def action(player):
+            if player.current is None and not player.history:
+                return "❌ Önceki şarkı yok!"
+            await player.previous(None)
+        await self._act(interaction, action)
+
+    @discord.ui.button(emoji="⏯️", style=discord.ButtonStyle.secondary, custom_id="np:pause", row=0)
     async def pause_button(self, interaction, button):
         async def action(player):
             if player.current is None:
@@ -118,7 +138,7 @@ class NowPlayingView(discord.ui.View):
                 await player.pause(None)
         await self._act(interaction, action)
 
-    @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary, custom_id="np:skip")
+    @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary, custom_id="np:skip", row=0)
     async def skip_button(self, interaction, button):
         async def action(player):
             if not player.is_playing:
@@ -126,7 +146,7 @@ class NowPlayingView(discord.ui.View):
             await player.skip(None)
         await self._act(interaction, action)
 
-    @discord.ui.button(emoji="🔀", style=discord.ButtonStyle.secondary, custom_id="np:shuffle")
+    @discord.ui.button(emoji="🔀", style=discord.ButtonStyle.secondary, custom_id="np:shuffle", row=1)
     async def shuffle_button(self, interaction, button):
         async def action(player):
             if len(player.queue) < 2:
@@ -134,13 +154,13 @@ class NowPlayingView(discord.ui.View):
             await player.shuffle_queue(None)
         await self._act(interaction, action)
 
-    @discord.ui.button(emoji="🔁", style=discord.ButtonStyle.secondary, custom_id="np:loop")
+    @discord.ui.button(emoji="🔁", style=discord.ButtonStyle.secondary, custom_id="np:loop", row=1)
     async def loop_button(self, interaction, button):
         async def action(player):
             player.cycle_loop()
         await self._act(interaction, action)
 
-    @discord.ui.button(emoji="📻", style=discord.ButtonStyle.secondary, custom_id="np:autoplay")
+    @discord.ui.button(emoji="📻", style=discord.ButtonStyle.secondary, custom_id="np:autoplay", row=1)
     async def autoplay_button(self, interaction, button):
         async def action(player):
             player.set_autoplay(not player.autoplay)

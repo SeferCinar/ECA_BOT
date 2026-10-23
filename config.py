@@ -47,6 +47,17 @@ class Config:
     except ValueError:
         CROSSFADE_SECONDS = 6
 
+    # Ses seviyesi eşitleme: yüksek şarkıları kısar, kısıkları açar (0 = kapalı)
+    AUDIO_NORMALIZE = os.getenv('AUDIO_NORMALIZE', '1').strip().lower() not in ('0', 'false', 'no', 'off')
+
+    # Kalıcı veriler (istatistik veritabanı); Docker'da volume olarak bağlanır
+    DATA_DIR = os.path.join(BASE_DIR, os.getenv('DATA_DIR', 'data'))
+
+    # Haftalık özetin (pazar 21:00) atılacağı text kanalı; boşsa NOW_PLAYING_CHANNEL_ID, o da boşsa atılmaz
+    STATS_CHANNEL_ID = os.getenv('STATS_CHANNEL_ID', '').strip() or None
+    # Haftalık özet ve "en yoğun saat" için saat dilimi
+    TIMEZONE = os.getenv('TIMEZONE', 'Europe/Istanbul').strip() or 'Europe/Istanbul'
+
     # "Şimdi çalıyor" kartının atılacağı text kanalı (boşsa son müzik komutunun yazıldığı kanal)
     NOW_PLAYING_CHANNEL_ID = os.getenv('NOW_PLAYING_CHANNEL_ID', '').strip() or None
 

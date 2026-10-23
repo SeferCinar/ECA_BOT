@@ -27,6 +27,7 @@ Thumbs.db
 # Local data (will be mounted as volumes)
 music/
 playlists/
+data/
 
 # Environment (loaded separately)
 .env
