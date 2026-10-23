@@ -63,6 +63,9 @@ class TrackIn(BaseModel):
     video_id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
     title: str = Field(default="", max_length=300)
     artists: str = Field(default="", max_length=300)
+    # "Şimdi çalıyor" kartı için; yoksa stream alınınca yt-dlp'den gelir
+    duration: str = Field(default="", max_length=10)
+    thumbnail: str = Field(default="", max_length=1000, pattern=r"^(https?://\S+)?$")
 
 
 class QueueAddBody(BaseModel):
@@ -157,6 +160,45 @@ class AutoplayBody(BaseModel):
 async def autoplay(body: AutoplayBody, request: Request):
     try:
         return await svc(request).set_autoplay(body.enabled, body.guild_id)
+    except ServiceError as e:
+        handle(e)
+
+
+class SeekBody(BaseModel):
+    position: float = Field(ge=0)
+    guild_id: Optional[str] = None
+
+
+@router.post("/seek")
+async def seek(body: SeekBody, request: Request):
+    try:
+        return await svc(request).seek(body.position, body.guild_id)
+    except ServiceError as e:
+        handle(e)
+
+
+class LoopBody(BaseModel):
+    mode: str
+    guild_id: Optional[str] = None
+
+
+@router.post("/loop")
+async def loop(body: LoopBody, request: Request):
+    try:
+        return await svc(request).set_loop(body.mode, body.guild_id)
+    except ServiceError as e:
+        handle(e)
+
+
+class FilterBody(BaseModel):
+    name: Optional[str] = None  # None / "off" = kapalı
+    guild_id: Optional[str] = None
+
+
+@router.post("/filter")
+async def audio_filter(body: FilterBody, request: Request):
+    try:
+        return await svc(request).set_filter(body.name, body.guild_id)
     except ServiceError as e:
         handle(e)
 

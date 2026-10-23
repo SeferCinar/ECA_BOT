@@ -41,6 +41,9 @@ class Config:
     # Mesaj metni; {channel} = ses kanalı adı, {minutes} = bekleme süresi (dk)
     AUTO_LEAVE_MESSAGE = os.getenv('AUTO_LEAVE_MESSAGE', '').strip()
 
+    # "Şimdi çalıyor" kartının atılacağı text kanalı (boşsa son müzik komutunun yazıldığı kanal)
+    NOW_PLAYING_CHANNEL_ID = os.getenv('NOW_PLAYING_CHANNEL_ID', '').strip() or None
+
     # Web control panel
     WEB_UI_TOKEN = os.getenv('WEB_UI_TOKEN', '').strip()
     WEB_UI_GUILD_ID = os.getenv('WEB_UI_GUILD_ID', '').strip() or None

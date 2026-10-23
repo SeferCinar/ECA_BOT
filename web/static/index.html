@@ -72,11 +72,26 @@
         <div class="card now-card">
           <h2>Şimdi çalıyor</h2>
           <div id="player-now" class="now-detail">
-            <div class="now-art" aria-hidden="true">♪</div>
+            <div class="now-art" aria-hidden="true"><img id="player-now-img" alt="" hidden /><span>♪</span></div>
             <div>
               <div id="player-now-title" class="now-name">Çalmıyor</div>
               <div id="player-now-meta" class="muted small">—</div>
             </div>
+          </div>
+          <div class="seek-wrap">
+            <span id="seek-pos" class="seek-time">0:00</span>
+            <input type="range" id="seek" min="0" max="0" value="0" step="1" aria-label="Şarkıda konum" disabled />
+            <span id="seek-dur" class="seek-time">0:00</span>
+          </div>
+          <div class="row filter-row">
+            <label for="filter-select" class="muted small">Filtre</label>
+            <select id="filter-select" class="shrink">
+              <option value="off">Kapalı</option>
+              <option value="bassboost">Bass Boost</option>
+              <option value="nightcore">Nightcore</option>
+              <option value="slowed">Slowed + Reverb</option>
+              <option value="8d">8D</option>
+            </select>
           </div>
         </div>
       </section>
@@ -184,6 +199,7 @@
         <button id="btn-stop" type="button" class="btn btn-icon" title="Stop">⏹</button>
         <button id="btn-shuffle" type="button" class="btn btn-icon" title="Shuffle">🔀</button>
         <button id="btn-clear" type="button" class="btn btn-icon" title="Clear queue">🗑</button>
+        <button id="btn-loop" type="button" class="btn btn-icon btn-toggle" title="Döngü: kapalı" aria-pressed="false">🔁</button>
         <button id="btn-autoplay" type="button" class="btn btn-icon btn-toggle" title="Autoplay: kuyruk bitince benzer şarkılarla devam et" aria-pressed="false">📻</button>
       </div>
       <div class="vol-wrap">

@@ -494,3 +494,60 @@ async def test_remove_from_queue_unknown_id_raises_not_found():
         await svc.remove_from_queue("missing")
     assert exc.value.status == 404
     assert exc.value.code == "NOT_IN_QUEUE"
+
+
+def _playing_service(duration=200):
+    from unittest.mock import patch
+    from music import MusicPlayer, WebUser
+
+    g = G(1)
+    g.voice_client = MagicMock()
+    player = MusicPlayer(None)
+    player.queue.append({"name": "a", "user": WebUser(), "is_stream": True, "stream_url": "https://s/a",
+                         "webpage_url": "https://www.youtube.com/watch?v=aaaaaaaaaaa", "duration": duration})
+    svc = MusicService(FakeBot([g]), lambda _id: player, None, None, "1")
+    patches = (patch("discord.FFmpegPCMAudio"), patch("discord.PCMVolumeTransformer"))
+    return svc, player, patches
+
+
+@pytest.mark.asyncio
+async def test_seek_loop_and_filter_round_trip():
+    svc, player, patches = _playing_service()
+    with patches[0], patches[1]:
+        player.set_voice_client(svc.bot.guilds[0].voice_client)
+        await player.play_next(None)
+
+        snap = await svc.seek(90)
+        assert snap["now"]["position"] == pytest.approx(90, abs=1)
+
+        snap = await svc.set_loop("queue")
+        assert snap["status"]["loop"] == "queue"
+
+        snap = await svc.set_filter("bassboost")
+        assert snap["status"]["filter"] == "bassboost"
+        snap = await svc.set_filter("off")
+        assert snap["status"]["filter"] is None
+
+
+@pytest.mark.asyncio
+async def test_seek_and_filter_reject_bad_input():
+    svc, player, patches = _playing_service(duration=60)
+
+    with pytest.raises(ServiceError) as exc:
+        await svc.seek(10)  # henüz çalmıyor
+    assert exc.value.code == "INVALID_STATE"
+
+    with patches[0], patches[1]:
+        player.set_voice_client(svc.bot.guilds[0].voice_client)
+        await player.play_next(None)
+        with pytest.raises(ServiceError) as exc:
+            await svc.seek(60)
+        assert exc.value.code == "INVALID_POSITION"
+
+    with pytest.raises(ServiceError) as exc:
+        await svc.set_loop("forever")
+    assert exc.value.code == "INVALID_LOOP"
+
+    with pytest.raises(ServiceError) as exc:
+        await svc.set_filter("chipmunk")
+    assert exc.value.code == "INVALID_FILTER"

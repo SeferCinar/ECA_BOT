@@ -645,9 +645,62 @@ select:focus {
   flex-shrink: 0;
 }
 
+.now-art {
+  overflow: hidden;
+}
+
+.now-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.now-art img:not([hidden]) + span {
+  display: none;
+}
+
 .now-name {
   font-weight: 650;
   font-size: 1.05rem;
+}
+
+.seek-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+}
+
+#seek {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+#seek:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.seek-time {
+  font-size: 0.8rem;
+  color: var(--muted);
+  min-width: 2.6rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.seek-time:last-child {
+  text-align: right;
+}
+
+.filter-row {
+  margin-top: 0.75rem;
+  align-items: center;
+}
+
+.filter-row select {
+  width: auto;
 }
 
 /* —— Sticky player bar —— */
