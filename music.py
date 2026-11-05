@@ -101,6 +101,15 @@ def _probe_duration(path):
         return None
 
 
+def _log_failure(future):
+    """Oynatıcı thread'inden başlatılan görev hata verirse logla (yoksa sessizce kaybolur)."""
+    if future.cancelled():
+        return
+    error = future.exception()
+    if error is not None:
+        print(f"⚠️ Sıradaki şarkıya geçilemedi: {error!r}", flush=True)
+
+
 def _wait_for_audio(source, timeout=10):
     """FFmpeg ilk sesi üretene kadar bekle (okumadan), kaynak değişince boşluk olmasın."""
     stdout = getattr(source, '_stdout', None)
@@ -218,12 +227,17 @@ class MusicPlayer:
         self.voice_client = voice_client
 
     def _get_voice_client(self, interaction):
-        """Prefer stored voice_client; fall back to interaction.guild.voice_client."""
-        if self.voice_client is not None:
-            return self.voice_client
-        if interaction is None:
-            return None
-        return interaction.guild.voice_client
+        """Connected voice client: the stored one, else interaction.guild.voice_client; None if neither.
+
+        The stored client goes stale when the bot is disconnected from outside (kicked from the
+        channel, Discord dropped the connection). Playing on it fails with "Not connected to voice"
+        even after /play has joined again with a new client, so it is skipped.
+        """
+        guild_vc = interaction.guild.voice_client if interaction is not None else None
+        for vc in (self.voice_client, guild_vc):
+            if vc is not None and vc.is_connected():
+                return vc
+        return None
     
     async def _send_message(self, interaction, message, ephemeral=False):
         """Mesaj gönder (hem interaction hem de ctx destekler). Web path: no-op."""
@@ -405,24 +419,45 @@ class MusicPlayer:
         source = self._make_source(song)
         if not await self._warm_up(song, source):
             return  # stop/skip/leave araya girdi
+        voice_client = self._get_voice_client(interaction)
+        if voice_client is None:  # stream adresi alınırken bağlantı koptu
+            source.cleanup()
+            self.queue.appendleft(song)
+            self.current = None
+            self.is_playing = False
+            self._changed()
+            await self._send_message(interaction, "❌ Ses kanalına bağlı değilim!")
+            return
+        self.voice_client = voice_client
         mixer = CrossfadeMixer(source, volume=self.volume)
 
         # after-callback must not require a live Interaction; interaction may be None (web)
         def _after(err):
             if err is not None:
-                return
+                print(f"⚠️ Çalma hatası: {err!r}", flush=True)
             if self.bot is None or getattr(self.bot, "loop", None) is None:
                 return
-            asyncio.run_coroutine_threadsafe(
-                self.play_next(interaction),
+            future = asyncio.run_coroutine_threadsafe(
+                self._player_stopped(voice_client, interaction),
                 self.bot.loop,
             )
+            future.add_done_callback(_log_failure)
 
         self._mixer = mixer
-        self.voice_client.play(mixer, after=_after)
+        voice_client.play(mixer, after=_after)
         if self.is_paused:  # stream adresi alınırken duraklatıldıysa
             self.voice_client.pause()
         self._song_started()
+
+    async def _player_stopped(self, voice_client, interaction):
+        """Oynatıcı durdu: şarkı bitti, geçildi ya da ses bağlantısı koptu."""
+        if not voice_client.is_connected() and self._get_voice_client(interaction) is None:
+            # Bot kanaldan atıldı ya da bağlantı düştü. Durum "çalıyor" kalırsa sonraki /play
+            # şarkıyı sadece kuyruğa ekler, hiçbir şey çalmaz: /leave gibi sıfırla.
+            print("🔌 Ses bağlantısı koptu, çalma durumu sıfırlandı", flush=True)
+            self.cleanup()
+            return
+        await self.play_next(interaction)
 
     def _set_current(self, song):
         self.current = song
