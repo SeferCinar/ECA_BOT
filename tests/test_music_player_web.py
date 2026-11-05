@@ -326,10 +326,96 @@ async def test_play_next_with_none_interaction_uses_voice_client():
     # after callback should call play_next with same interaction (None), not require Interaction
     after_cb = vc.play.call_args.kwargs.get("after") or vc.play.call_args[1].get("after")
     assert after_cb is not None
-    # Invoke with error -> should not schedule
+    # Invoke with error -> logged, still advances (the player must not freeze in "playing")
     after_cb(Exception("boom"))
     # Invoke with None -> schedules play_next(None); ensure no crash
     after_cb(None)
+
+
+def _voice_client(connected=True):
+    vc = MagicMock()
+    vc.is_connected.return_value = connected
+    return vc
+
+
+def test_get_voice_client_skips_disconnected_stored():
+    """Bot kicked from the channel, then /play joined again: use the new client, not the dead one."""
+    p = MusicPlayer(FakeBot())
+    p.voice_client = _voice_client(connected=False)
+    interaction = MagicMock()
+    interaction.guild.voice_client = fresh = _voice_client()
+    assert p._get_voice_client(interaction) is fresh
+    assert p._get_voice_client(None) is None
+
+
+@pytest.mark.asyncio
+async def test_play_next_after_kick_plays_on_new_voice_client():
+    p = MusicPlayer(FakeBot())
+    p.voice_client = dead = _voice_client(connected=False)
+    interaction = MagicMock()
+    interaction.guild.voice_client = fresh = _voice_client()
+    p.queue.append(_queued("a.mp3", "a"))
+
+    with patch("discord.FFmpegPCMAudio"):
+        await p.play_next(interaction)
+
+    dead.play.assert_not_called()
+    fresh.play.assert_called_once()
+    assert p.voice_client is fresh
+    assert p.is_playing is True
+
+
+@pytest.mark.asyncio
+async def test_play_next_voice_lost_while_preparing_keeps_song_queued():
+    """Connection dropped while FFmpeg started: no exception, song stays first in the queue."""
+    p = MusicPlayer(FakeBot())
+    p.voice_client = vc = _voice_client()
+    p.queue.append(_queued("a.mp3", "a"))
+
+    async def drop_connection(song, source):
+        vc.is_connected.return_value = False
+        return True
+
+    with patch("discord.FFmpegPCMAudio"), patch.object(p, "_warm_up", drop_connection):
+        await p.play_next(None)
+
+    vc.play.assert_not_called()
+    assert p.is_playing is False
+    assert p.current is None
+    assert [s["name"] for s in p.queue] == ["a.mp3"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("paused", [False, True])
+async def test_player_stopped_after_disconnect_resets_state(paused):
+    """Kicked while playing or paused: state resets so the next /play starts playing again."""
+    p = MusicPlayer(FakeBot())
+    vc = _voice_client(connected=False)
+    p.voice_client = vc
+    p.current = _queued("a.mp3", "a")
+    p.queue.append(_queued("b.mp3", "b"))
+    p.is_playing, p.is_paused = True, paused
+
+    await p._player_stopped(vc, None)
+
+    assert (p.is_playing, p.is_paused, p.current, p.voice_client) == (False, False, None, None)
+    assert len(p.queue) == 0
+
+    interaction = MagicMock()
+    interaction.guild.voice_client = fresh = _voice_client()
+    with patch("discord.FFmpegPCMAudio"), patch.object(p, "_send_message", AsyncMock()):
+        await p.add_to_queue(interaction, __file__, WebUser())
+    fresh.play.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_player_stopped_while_connected_advances():
+    p = MusicPlayer(FakeBot())
+    vc = _voice_client()
+    p.voice_client = vc
+    with patch.object(p, "play_next", AsyncMock()) as play_next:
+        await p._player_stopped(vc, None)
+    play_next.assert_awaited_once_with(None)
 
 
 def _queued(name, queue_id):

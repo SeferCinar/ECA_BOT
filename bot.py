@@ -269,14 +269,16 @@ async def join(interaction: discord.Interaction):
 @tree.command(name='leave', description='Botu ses kanalından çıkar')
 async def leave(interaction: discord.Interaction):
     """Botu ses kanalından çıkar"""
+    player = music_players.pop(interaction.guild.id, None)
     if interaction.guild.voice_client is None:
+        if player is not None:
+            player.cleanup()  # kanaldan dışarıdan atılmış olabilir: takılı kalan durumu da sıfırla
         await interaction.response.send_message("❌ Zaten hiçbir ses kanalında değilim!", ephemeral=True)
         return
-    
+
     await interaction.guild.voice_client.disconnect()
-    if interaction.guild.id in music_players:
-        music_players[interaction.guild.id].cleanup()
-        del music_players[interaction.guild.id]
+    if player is not None:
+        player.cleanup()
     await interaction.response.send_message("👋 Ses kanalından ayrıldım!")
 
 # ========== MÜZİK ÇALMA KOMUTLARI ==========
